@@ -39,40 +39,36 @@ else:
 @st.cache_resource
 def init_connection():
     """
-    🌐 Supabase接続設定（セキュリティ最優先・本番シークレットルート版）
+    🌐 Supabase接続設定（Render環境変数およびシークレットを完全パース）
     """
-    # ① まずは通常の環境変数からロードを試みる
+    # 💡 Renderの「Environment」から前後の空白を完全に剥ぎ取って安全にロード
     url = os.environ.get("SUPABASE_URL", "").strip()
     key = os.environ.get("SUPABASE_KEY", "").strip()
     storage_url = os.environ.get("SUPABASE_STORAGE_URL", "").strip()
 
-    # 🚨【鉄壁の解決策】もしRender上で storage_url やキーがブランクとして弾かれた場合、
-    # Streamlitが誇る本番環境変数自動マッピング機能（st.secrets）をフル活用して強硬突破します！
-    if not url or not key or not storage_url:
+    # 🚨 もし環境変数が空っぽだった場合、ローカルPC開発環境（secrets.toml）から安全に引き抜く
+    if not url or not key:
         try:
-            # Render上の「Environment」で大文字で登録した名前が、ここに自動で降ってきます
-            if not url and "SUPABASE_URL" in st.secrets:
-                url = st.secrets["SUPABASE_URL"].strip()
-            if not key and "SUPABASE_KEY" in st.secrets:
-                key = st.secrets["SUPABASE_KEY"].strip()
-            if not storage_url and "SUPABASE_STORAGE_URL" in st.secrets:
+            url = st.secrets["SUPABASE_URL"].strip()
+            key = st.secrets["SUPABASE_KEY"].strip()
+            # secrets.toml にSTORAGEキーがあるか安全にチェック
+            if "SUPABASE_STORAGE_URL" in st.secrets:
                 storage_url = st.secrets["SUPABASE_STORAGE_URL"].strip()
         except Exception:
-            pass
+            raise RuntimeError(
+                "❌ Supabaseの認証情報またはストレージURLが見つかりません。"
+                "Renderの環境変数（Environment Variables）に「SUPABASE_URL」と「SUPABASE_KEY」、"
+                "および「SUPABASE_STORAGE_URL」が正しく登録されているか今一度確認してください。"
+            )
 
-    # ② 最終チェック：どうしても見つからなかった場合のみ、画面を巻き添えにせず安全にエラー停止
-    if not url or not key or not storage_url:
-        raise RuntimeError(
-            "❌ Supabaseの認証情報またはストレージURL（SUPABASE_STORAGE_URL）がブランクです。"
-            "Renderの『Environment』画面で、スペルが大文字で正確に登録されているか今一度ご確認ください。"
-        )
-
-    # ③ 末尾にスラッシュ（/）がなければ自動で強制補完してURL破損を未然に防ぐ
-    if not storage_url.endswith("/"):
-        storage_url += "/"
-
-    # ④ 共通の器（settings）へ動的注入（ソースコードの書き換えコストをゼロに維持）
-    settings.STORAGE_BASE_URL = storage_url
+    # 💡 【今回の最重要マージ】取得した最新のストレージURLを、システム全体が参照する settings クラスへ動的注入！
+    # これにより、各採点子画面（question_list.py や hold_management.py）内の `settings.STORAGE_BASE_URL` が
+    # 自動的にこの環境変数の値へと寸分の狂いもなくリアルタイムに同期されます。
+    if storage_url:
+        # 💡 万が一設定値の末尾にスラッシュがなくても、自動で補完してURLの破損を完全ガード！
+        if not storage_url.endswith("/"):
+            storage_url += "/"
+        settings.STORAGE_BASE_URL = storage_url
 
     return create_client(url, key)
 
