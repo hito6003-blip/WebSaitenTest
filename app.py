@@ -5,14 +5,14 @@ import os
 from datetime import datetime, timezone
 from supabase import create_client
 
-# 🎯 【画面幅の拡張】これを追加するだけで画面が横いっぱいに広がります！
+# 🎯 【画面幅の拡張】ワイド解像度（1920x1200）をフル活用
 st.set_page_config(
     page_title="試験データ管理システム", 
     page_icon="📊", 
-    layout="wide" # 💡 ここを "wide" に指定するのが最大のポイント！
+    layout="wide"
 )
 
-# ⚙️ settingsモジュールのインポート（別名定義settings.pyを想定）
+# ⚙️ settingsモジュールのインポート
 try:
     import settings
 except ImportError:
@@ -21,7 +21,6 @@ except ImportError:
 
 # 🛡️ 設定ファイルからタブ権限を動的に取得・パースするロジック
 def _parse_role_list(val):
-    """settingsから取得したロール設定を安全にリスト形式に変換します"""
     if isinstance(val, list):
         return [int(x) for x in val if str(x).isdigit()]
     if isinstance(val, int):
@@ -30,35 +29,54 @@ def _parse_role_list(val):
         return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
     return []
 
-# settings.TAB_ROLE_CONFIG の値をパースして適用
 if hasattr(settings, "TAB_ROLE_CONFIG") and settings.TAB_ROLE_CONFIG:
     TAB_ACCESS = {k: _parse_role_list(v) for k, v in settings.TAB_ROLE_CONFIG.items()}
 else:
-    # ⚠️ 万が一設定がない場合の安全な予備（1行にまとめ、コロンの後の空欄を絶対に発生させない仕様）
     TAB_ACCESS = {"tab1": [], "tab2": [], "tab3": [], "tab4": [], "tab5": [], "tab6": [], "tab7": []}
 
-# 🌐 1. Supabaseの接続設定（@st.cache_resource による高速・安全な接続保持）
+
+# 🌐 1. Supabaseの接続および画像ストレージURLの環境変数・シークレット一括ロード
 @st.cache_resource
 def init_connection():
-    # 💡 RenderやRailwayなどの有料サーバーの環境変数から直接読み込む
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
+    """
+    🌐 Supabase接続設定（Render環境変数およびシークレットを完全パース）
+    """
+    # 💡 Renderの「Environment」から前後の空白を完全に剥ぎ取って安全にロード
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    storage_url = os.environ.get("SUPABASE_STORAGE_URL", "").strip()
 
-    # もし有料サーバー上で空っぽだった場合、ローカルPC（secrets.toml）から読み込む
+    # 🚨 もし環境変数が空っぽだった場合、ローカルPC開発環境（secrets.toml）から安全に引き抜く
     if not url or not key:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
+        try:
+            url = st.secrets["SUPABASE_URL"].strip()
+            key = st.secrets["SUPABASE_KEY"].strip()
+            # secrets.toml にSTORAGEキーがあるか安全にチェック
+            if "SUPABASE_STORAGE_URL" in st.secrets:
+                storage_url = st.secrets["SUPABASE_STORAGE_URL"].strip()
+        except Exception:
+            raise RuntimeError(
+                "❌ Supabaseの認証情報またはストレージURLが見つかりません。"
+                "Renderの環境変数（Environment Variables）に「SUPABASE_URL」と「SUPABASE_KEY」、"
+                "および「SUPABASE_STORAGE_URL」が正しく登録されているか今一度確認してください。"
+            )
+
+    # 💡 【今回の最重要マージ】取得した最新のストレージURLを、システム全体が参照する settings クラスへ動的注入！
+    # これにより、各採点子画面（question_list.py や hold_management.py）内の `settings.STORAGE_BASE_URL` が
+    # 自動的にこの環境変数の値へと寸分の狂いもなくリアルタイムに同期されます。
+    if storage_url:
+        settings.STORAGE_BASE_URL = storage_url
 
     return create_client(url, key)
 
-# 🌐 Supabase クライアント初期化（関数 init_connection を正しく呼び出す形に修正）
+
+# 🌐 Supabase クライアント初期化実行
 if not hasattr(st.session_state, "supabase_client"):
     try:
-        # 💡 作成した関数 init_connection() をここで呼び出し、環境変数や secrets から安全に取得！
         supabase = init_connection()
         st.session_state["supabase_client"] = supabase
     except Exception as e:
-        st.error(f"❌ Supabaseの初期化に失敗しました。環境変数または secrets.toml の設定を確認してください: {e}")
+        st.error(f"❌ Supabaseの初期化に失敗しました: {e}")
         st.stop()
 else:
     supabase = st.session_state["supabase_client"]
