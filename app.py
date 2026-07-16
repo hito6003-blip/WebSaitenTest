@@ -64,11 +64,24 @@ def init_connection():
     # 💡 【今回の最重要マージ】取得した最新のストレージURLを、システム全体が参照する settings クラスへ動的注入！
     # これにより、各採点子画面（question_list.py や hold_management.py）内の `settings.STORAGE_BASE_URL` が
     # 自動的にこの環境変数の値へと寸分の狂いもなくリアルタイムに同期されます。
+    # 💡 【最終防衛マージ】環境変数から取得したURLを徹底検証して注入
     if storage_url:
-        # 💡 万が一設定値の末尾にスラッシュがなくても、自動で補完してURLの破損を完全ガード！
+        # ① 前後の余分な空白や改行を徹底排除
+        storage_url = storage_url.strip()
+        
+        # ② 万が一 http:// や https:// から始まっていない場合の自動補完
+        if not (storage_url.startswith("http://") or storage_url.startswith("https://")):
+            # プロジェクトIDから始まる短い文字列だった場合などを想定して https:// を自動付与
+            storage_url = "https://" + storage_url
+            
+        # ③ 末尾にスラッシュ（/）がなければ自動で強制付与してURL破損を完全ガード
         if not storage_url.endswith("/"):
             storage_url += "/"
+            
         settings.STORAGE_BASE_URL = storage_url
+    else:
+        # 環境変数が完全に空欄だった場合のセーフティ
+        settings.STORAGE_BASE_URL = ""
 
     return create_client(url, key)
 
