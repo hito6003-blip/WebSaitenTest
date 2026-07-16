@@ -1,6 +1,8 @@
 # settings.py などの環境設定ファイル
 IS_TEST_MODE = True  # 🧪 ローカルテスト時は True。本番リリース時はここを False にするだけでボタンが消滅します。
 
+# supabaseのストレージURL
+STORAGE_BASE_URL = ""
 
 # settings.py
 # UI表示文字列を集中管理する辞書をここに置きます。
