@@ -1,8 +1,6 @@
 # settings.py などの環境設定ファイル
 IS_TEST_MODE = True  # 🧪 ローカルテスト時は True。本番リリース時はここを False にするだけでボタンが消滅します。
 
-#SupabaseのストレージのURLを設定
-STORAGE_BASE_URL = "https://eojjhyjkfnynnhnmlbwb.supabase.co/storage/v1/object/public/correct_image/"
 
 # settings.py
 # UI表示文字列を集中管理する辞書をここに置きます。
