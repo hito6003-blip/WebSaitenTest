@@ -297,9 +297,29 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         if master_response.data and len(master_response.data) > 0:
                             file_name = master_response.data[0].get("correct_image_file_name")
                             if file_name and str(file_name).strip() != "":
-                                full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
+                                # settings.STORAGE_BASE_URL の値を安全に取得
+                                base_url = getattr(settings, "STORAGE_BASE_URL", "").strip()
+                                full_img_url = f"{base_url}{file_name}"
+                                
+                                # 💡 デバッグ用アナウンス（動いたら st.caption(full_img_url) は消してOKです）
+                                st.caption(f"🔍 読み込み中のURL: {full_img_url}")
+                                
                                 st.markdown("**🎯 正答画像 (お手本)**")
-                                st.markdown("<style>div[data-testid='stImage'] img { max-height: 280px; object-fit: contain; }</style>", unsafe_allow_html=True)
+                                st.markdown(
+                                    """
+                                    <style>
+                                    div[data-testid='stImage'] img {
+                                        max-height: 380px;
+                                        width: 100% !important;
+                                        object-fit: contain;
+                                        background-color: #f8f9fa;
+                                        border-radius: 6px;
+                                        border: 1px solid #e0e0e0;
+                                    }
+                                    </style>
+                                    """, 
+                                    unsafe_allow_html=True
+                                )
                                 st.image(full_img_url, use_container_width=True)
                             else:
                                 st.caption("⚠️ 正答画像ファイル名が登録されていません。")
