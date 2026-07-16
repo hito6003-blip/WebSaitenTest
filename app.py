@@ -65,6 +65,9 @@ def init_connection():
     # これにより、各採点子画面（question_list.py や hold_management.py）内の `settings.STORAGE_BASE_URL` が
     # 自動的にこの環境変数の値へと寸分の狂いもなくリアルタイムに同期されます。
     if storage_url:
+        # 💡 万が一設定値の末尾にスラッシュがなくても、自動で補完してURLの破損を完全ガード！
+        if not storage_url.endswith("/"):
+            storage_url += "/"
         settings.STORAGE_BASE_URL = storage_url
 
     return create_client(url, key)
