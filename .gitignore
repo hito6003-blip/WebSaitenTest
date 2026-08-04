@@ -1,0 +1,4 @@
+# Supabaseの実行ファイルをGitに入れない設定
+*.exe
+supabase.exe
+supabase-go.exe
