@@ -12,15 +12,7 @@ st.set_page_config(
     page_icon="📊", 
     layout="wide"
 )
-# ページの自動翻訳を防止するHTMLヘッダーを注入
-st.markdown(
-    """
-    <head>
-        <meta name="google" content="notranslate">
-    </head>
-    """,
-    unsafe_allow_html=True
-)
+
 
 # ⚙️ settingsモジュールのインポート
 try:
@@ -204,13 +196,13 @@ else:
         visible_tab_labels.append(settings.LABELS["tab2_group_label"])
         visible_tab_keys.append("tab2")
     if show_tab3:
-        visible_tab_labels.append(settings.LABELS.get("tab3_header", "CSV一括取り込み"))
+        visible_tab_labels.append(settings.LABELS.get("tab3_header", "採点情報付きCSV取込"))
         visible_tab_keys.append("tab3")
     if show_tab4:
         visible_tab_labels.append(settings.LABELS['tab3_title'])
         visible_tab_keys.append("tab4")
     if show_tab5:
-        visible_tab_labels.append("📥 採点用データ管理")
+        visible_tab_labels.append("📥 AI採点用データ管理")
         visible_tab_keys.append("tab5")
     if show_tab6:
         visible_tab_labels.append("📤 採点完了データ出力") 

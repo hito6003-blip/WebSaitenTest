@@ -18,7 +18,7 @@ LABELS = {
     # タブラベル
     "tab1_label": "採点画面",
     "tab2_group_label": "採点管理画面",
-    "tab3_label": "CSVデータ取り込み画面",
+    "tab3_label": "CSVデータ取込画面",
     "tab4_label": "ファイルのアップロード & ダウンロード",
 
     # Tab1
