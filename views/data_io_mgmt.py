@@ -236,7 +236,7 @@ def show_data_io_management(supabase, settings):
     # ==========================================================
     with tab5_sub1:
         st.markdown("##### 1. 未処理データの出力")
-        st.markdown("`tbl_scoring_question_management` テーブルから、AI採点判定（`ai_judge_mark`）が**未登録（Null）**のレコードを抽出してCSV形式でダウンロードします。")
+        #st.markdown("`tbl_scoring_question_management` テーブルから、AI採点判定（`ai_judge_mark`）が**未登録（Null）**のレコードを抽出してCSV形式でダウンロードします。")
         
         if st.button("🔍 対象データを抽出・プレビュー", key="tab5_fetch_btn", use_container_width=True):
             with st.spinner("データベースから未登録データを抽出中..."):
@@ -324,7 +324,7 @@ def show_data_io_management(supabase, settings):
     # ==============================================================================
     with tab5_sub2:
         st.markdown("##### 2. 採点結果CSV of アップロード登録")
-        st.markdown("AIの採点結果（`ai_cp1~3`, `ai_reason`）がダブルクォーテーションで囲まれた状態のCSVファイルをアップロードし、データベースを更新します。")
+        #st.markdown("AIの採点結果（`ai_cp1~3`, `ai_reason`）がダブルクォーテーションで囲まれた状態のCSVファイルをアップロードし、データベースを更新します。")
         st.info("⚠️ 取り込み可能なCSVファイルは **UTF-8（BOMあり）形式のみ** です。")
         
         required_cols_tab5 = [
@@ -390,7 +390,7 @@ def show_data_io_management(supabase, settings):
                             st.write(f"📊 **読み込みプレビュー: {len(df_result)} 件のデータが正常にパースされました**")
                             st.dataframe(df_result.head(100), use_container_width=True)
 
-                            if st.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
+                            if sstreat.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
                                 null_pk_result = df_result[df_result['saiten_question_id'].isna() | (df_result['saiten_question_id'] == '')]
                                 
                                 if len(null_pk_result) > 0:
