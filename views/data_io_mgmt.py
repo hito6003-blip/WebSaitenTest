@@ -390,7 +390,7 @@ def show_data_io_management(supabase, settings):
                             st.write(f"📊 **読み込みプレビュー: {len(df_result)} 件のデータが正常にパースされました**")
                             st.dataframe(df_result.head(100), use_container_width=True)
 
-                            if sstreat.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
+                            if st.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
                                 null_pk_result = df_result[df_result['saiten_question_id'].isna() | (df_result['saiten_question_id'] == '')]
                                 
                                 if len(null_pk_result) > 0:
