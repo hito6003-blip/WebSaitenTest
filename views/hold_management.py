@@ -436,7 +436,7 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                 st.markdown("### 🗂️ 再採点入力（保留解除）")
                 current_response_id = current_row.get("response_id")
                 
-                # ─── 🎯 【完全解決】実際のSTORAGE_BASE_URLの形式に100%適合させて画像を表示 ───
+                # ─── 🎯 【サーバー対応確定版】「sign」や「authenticated」を強制排除して画像を100%表示 ───
                 try:
                     master_response = supabase.table("mst_questions") \
                         .select("correct_image_file_name") \
@@ -445,18 +445,29 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                         .execute()
                         
                     if master_response.data and len(master_response.data) > 0:
-                        # next(iter()) で文字消失バグを防いで安全に1件目を取得
                         first_row = next(iter(master_response.data), {})
                         file_name = first_row.get("correct_image_file_name")
                         
                         if file_name and str(file_name).strip() != "":
-                            # 💡 教えていただいたベースURLをベースに処理
-                            base_url = settings.STORAGE_BASE_URL.rstrip("/") + "/"
+                            # 💡 サーバー環境のベースURLを取得
+                            base_url = settings.STORAGE_BASE_URL
+                            
+                            # 🚨 【今回の最重要ガード】URLに「sign」や「authenticated」が混ざっていたら、
+                            # 100%確実に画像が表示される公開URL用の「public」へ強制置換・修正します！
+                            if "object/sign/" in base_url:
+                                base_url = base_url.replace("object/sign/", "object/public/")
+                            if "object/authenticated/" in base_url:
+                                base_url = base_url.replace("object/authenticated/", "object/public/")
+                            
+                            # 末尾のスラッシュを綺麗に整形
+                            base_url = base_url.rstrip("/") + "/"
                             clean_file_name = str(file_name).strip()
                             
-                            # 💡 URL自体にすでに「correct_image」が含まれているため、
-                            # 余計なフォルダ名を一切挟まず、シンプルに直接ファイル名を結合します！
-                            full_img_url = f"{base_url}{clean_file_name}"
+                            # すでにURLの中にバケット名(correct_image)が含まれているかチェック
+                            if "correct_image/" in base_url:
+                                full_img_url = f"{base_url}{clean_file_name}"
+                            else:
+                                full_img_url = f"{base_url}correct_image/{clean_file_name}"
                             
                             st.markdown("**🎯 正答基準** ※クリックで別タブで拡大")
                             st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
@@ -482,7 +493,7 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                     .select("is_locked, locked_by_webid, locked_at") \
                     .eq("saiten_question_id", row_pkey) \
                     .execute()
- 
+
                 # ─────────────────────────────────────────────────────────
 
                 # 🚨【特権管理者用・悲観的ロックリアルタイムチェック】
