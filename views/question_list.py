@@ -4,6 +4,11 @@ from datetime import datetime, date, timezone, timedelta
 from zoneinfo import ZoneInfo
 import time
 
+try:
+    from master_cache import clear_master_cache, get_question_master
+except ImportError:
+    from views.master_cache import clear_master_cache, get_question_master
+
 def show_question_list(supabase, settings, current_user_id, current_role_id):
     """
     📄 タブ1: レスポンス識別子別集計(採点者画面・完全最適化同期版)
@@ -19,6 +24,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
     if st.session_state["current_step"] == "select":
         st.header(settings.LABELS["tab1_header"])
         if st.button(settings.LABELS["refresh_button"], key="refresh_btn"):
+            clear_master_cache()
             st.rerun()
 
         try:
@@ -31,11 +37,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     .execute()
                 
                 # 問題マスタから一括取得
-                master_res = supabase.table("mst_questions") \
-                    .select("response_id, question_title") \
-                    .execute()
-                
-                master_data = master_res.data or []
+                master_data = get_question_master(supabase)
                 question_title_map = {row["response_id"]: row.get("question_title", "") for row in master_data if row.get("response_id")}
             
             if response.data:
@@ -84,7 +86,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 h_col1, h_col2, h_col3, h_col4, h_col5, h_col6, h_col7, h_col8 = st.columns([1.5, 1.5, 3.2, 0.8, 0.8, 0.8, 0.8, 1.5])
                 h_col1.markdown("**担当採点者**")
                 h_col2.markdown("**採点完了日**")
-                h_col3.markdown("**問題（マスタ日本語）**")
+                h_col3.markdown("**問題**")
                 h_col4.markdown("**総数**")
                 h_col5.markdown("**未採点**")
                 h_col6.markdown("**採点済**") # 💡追加
@@ -152,11 +154,13 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
         if selected_grader and selected_response:
             display_title = selected_response
             try:
-                title_res = supabase.table("mst_questions").select("question_title").eq("response_id", selected_response).limit(1).execute()
-                if title_res.data and len(title_res.data) > 0:
-                    title_val = title_res.data[0].get("question_title")
-                    if title_val and str(title_val).strip() != "":
-                        display_title = str(title_val).strip()
+                question = next(
+                    (row for row in get_question_master(supabase) if row.get("response_id") == selected_response),
+                    None,
+                )
+                title_val = question.get("question_title") if question else None
+                if title_val and str(title_val).strip() != "":
+                    display_title = str(title_val).strip()
             except Exception:
                 pass
 
@@ -288,25 +292,40 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     current_response_id = current_row.get("response_id")
                     
                     try:
-                        master_response = supabase.table("mst_questions") \
-                            .select("correct_image_file_name") \
-                            .eq("response_id", current_response_id) \
-                            .limit(1) \
-                            .execute()
-                            
-                        if master_response.data and len(master_response.data) > 0:
-                            file_name = master_response.data[0].get("correct_image_file_name")
-                            if file_name and str(file_name).strip() != "":
-                                full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
-                                st.markdown("**🎯 正答画像 (お手本)**")
-                                st.markdown("<style>div[data-testid='stImage'] img { max-height: 280px; object-fit: contain; }</style>", unsafe_allow_html=True)
-                                st.image(full_img_url, use_container_width=True)
+                        master_row = next(
+                            (row for row in get_question_master(supabase) if row.get("response_id") == current_response_id),
+                            {},
+                        )
+                        file_name = master_row.get("correct_image_file_name")
+
+                        if file_name and str(file_name).strip() != "":
+                            base_url = settings.STORAGE_BASE_URL
+                            if "/storage/" in base_url:
+                                domain = base_url.split("/storage/")[0]
                             else:
-                                st.caption("⚠️ 正答画像ファイル名が登録されていません。")
+                                domain = base_url.rstrip("/")
+
+                            clean_file_name = str(file_name).strip()
+                            full_img_url = f"{domain}/storage/v1/object/public/correct_image/{clean_file_name}"
+
+                            st.markdown("**🎯 正答画像 (お手本)** ※クリックで別タブで拡大")
+                            st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
+
+                            # 💡 ブラウザ標準のシンプルな a タグ（target="_blank"）のみに戻しました
+                            html_preview = f"""
+                            <div class="img-clickable-box">
+                                <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
+                                    <img src="{full_img_url}" />
+                                </a>
+                            </div>
+                            """
+                            st.markdown(html_preview, unsafe_allow_html=True)
                         else:
-                            st.caption("⚠️ 正答画像はマスタに登録されていません。")
+                            st.caption("⚠️ 正答画像ファイル名が登録されていません。")
                     except Exception as img_err:
-                        st.caption(f"（画像読み込みスキップ: {full_img_url + str(img_err)}）")
+                        st.caption(f"（画像読み込みスキップ: {img_err}）")
+                 
+           # ─────────────────────────────────────────────────────────
 
                     st.write("")
 
@@ -328,8 +347,24 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     else:
                         status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{current_judge}</span>"
 
-                    st.markdown(f"**現在の採点状況:** {status_html}", unsafe_allow_html=True)
+                    
+                    # ─── 📊 【新規追加】採点状況の横に進捗問題数を美しく配置 ───
+                    # 現在のインデックス（0始まり）に+1した数値と、全体のレコード数を取得
+                    current_num = current_index + 1
+                    total_num = total_records
+                    
+                    # st.columnsを使って、現在の採点状況（左）と問題数（右）を等幅で綺麗に横並び配置
+                    status_col1, status_col2 = st.columns([1.0, 1.0])
+                    
+                    with status_col1:
+                        st.markdown(f"**現在の採点状況:** {status_html}", unsafe_allow_html=True)
+                        
+                    with status_col2:
+                        # 💡 採点者がパッと直感的に見やすいように太字の青マイルド色でテキストを描画
+                        st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_num}問目（{total_num}問中）</p>", unsafe_allow_html=True)
+                    
                     st.write("")
+                    # ───────────────────────────────────────────────────────
 
                     
                     if is_admin_locked:
@@ -339,6 +374,113 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     
                     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                     selected_score = None
+
+                    # ─── 🎨 【確実背景色変更】選ばれていないボタンの背景色をグレーにするCSS ───
+                    if pd.notna(current_judge) and str(current_judge).strip() != "":
+                        tgt = str(current_judge).strip()
+                        c_styles = "<style>"
+                        
+                        # 選択されていない判定ボタンの背景をグレー(#E0E0E0)、文字を薄くする
+                        if tgt != "O": c_styles += f"div[class*='st-key-ans_true_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
+                        if tgt != "X": c_styles += f"div[class*='st-key-ans_false_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
+                        if tgt != "*": c_styles += f"div[class*='st-key-ans_none_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
+                        if tgt != "H": c_styles += f"div[class*='st-key-ans_hold_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
+                        
+                        # 選択されているボタンの枠線を黒く太く強調する
+                        act_key = {"O": "ans_true_", "X": "ans_false_", "*": "ans_none_", "H": "ans_hold_"}.get(tgt)
+                        if act_key: c_styles += f"div[class*='st-key-{act_key}'] button {{ border: 3px solid #111111 !important; font-weight: bold !important; box-shadow: 0px 4px 10px rgba(0,0,0,0.15) !important; }}"
+                        
+                        c_styles += "</style>"
+                        st.markdown(c_styles, unsafe_allow_html=True)
+                        
+                    # ─────────────────────────────────────────────────────────────────────────
+                 
+
+                    # ─── ⌨️ 【完全版】入力監視＆画像ウィンドウ一元管理JavaScript ───
+                    if not is_admin_locked:
+                        js_shortcut = f"""
+                        <script>
+                        // Streamlitアプリが動いている最上位のメイン画面のドキュメントをがっちり捕捉
+                        const doc = window.parent.document;
+                        
+                        // 画面が再描画されるたびに命令が重複してフリーズするのを防ぐため、古い命令を一度完全にお掃除
+                        if (window.scoringKeydownHandler) doc.removeEventListener('keydown', window.scoringKeydownHandler);
+                        if (window.openOtehonHandler) doc.removeEventListener('open_otehon_image', window.openOtehonHandler);
+                        if (window.closeOtehonHandler) doc.removeEventListener('close_otehon_window', window.closeOtehonHandler);
+                        
+                        // 💡 メイン画面側の変数として、開いた別ウィンドウのハンドル（操縦権限）をずっと記憶します
+                        if (!window.hasOwnProperty('otehonWindowRef')) {{
+                            window.otehonWindowRef = null;
+                        }}
+                        
+                        // 💡 【超重要】画像がクリックされた時に、メイン画面の権限で確実にタブを開く（使い回す）処理
+                        window.openOtehonHandler = function(e) {{
+                            const url = e.detail;
+                            // すでにタブが開いていて、かつ閉じられていない場合は、中身のURLだけを切り替えてフォーカスします（乱立防止）
+                            if (window.otehonWindowRef && !window.otehonWindowRef.closed) {{
+                                window.otehonWindowRef.location.href = url;
+                                window.otehonWindowRef.focus();
+                            }} else {{
+                                // まだ開いていない場合は、新しく名前をつけて開きます
+                                window.otehonWindowRef = window.parent.open(url, 'otehon_secure_tab');
+                            }}
+                        }};
+                        doc.addEventListener('open_otehon_image', window.openOtehonHandler);
+                        
+                        // 💡 一覧に戻るボタン（またはEnter）が押されたときに、開いているタブを強制終了する処理
+                        window.closeOtehonHandler = function() {{
+                            if (window.otehonWindowRef && !window.otehonWindowRef.closed) {{
+                                window.otehonWindowRef.close();
+                                window.otehonWindowRef = null;
+                            }}
+                        }};
+                        doc.addEventListener('close_otehon_window', window.closeOtehonHandler);
+                        
+                        // 🟢 キーボードショートカット（O, X, Space, H, N, B）の監視処理
+                        window.scoringKeydownHandler = function(e) {{
+                            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+                            if (e.repeat) return;
+                            
+                            let targetButton = null;
+                            let judgeLabel = "";
+                            const key = e.key;
+                            const keyLower = key.toLowerCase();
+                            
+                            if (keyLower === 'o') {{
+                                targetButton = doc.querySelector("div[class*='st-key-ans_true_'] button");
+                                judgeLabel = "🟢 正答(O)";
+                            }} else if (keyLower === 'x') {{
+                                targetButton = doc.querySelector("div[class*='st-key-ans_false_'] button");
+                                judgeLabel = "🔴 誤答(X)";
+                            }} else if (key === ' ') {{
+                                targetButton = doc.querySelector("div[class*='st-key-ans_none_'] button");
+                                judgeLabel = "⚪ 無答(*)";
+                            }} else if (keyLower === 'h') {{
+                                targetButton = doc.querySelector("div[class*='st-key-ans_hold_'] button");
+                                judgeLabel = "🟡 保留(H)";
+                            }} else if (keyLower === 'n') {{
+                                targetButton = doc.querySelector("div[class*='st-key-next_detail_btn'] button") || doc.getElementById("next_detail_btn");
+                            }} else if (keyLower === 'b') {{
+                                targetButton = doc.querySelector("div[class*='st-key-prev_detail_btn'] button") || doc.getElementById("prev_detail_btn");
+                            }}
+                            
+                            if (targetButton) {{
+                                e.preventDefault();
+                                if (judgeLabel !== "") {{
+                                    const confirmed = window.confirm(`判定を「${{judgeLabel}}」で登録して、次の問題に進みますか？\\n（Enterキーで確定）`);
+                                    if (confirmed) {{
+                                        targetButton.click();
+                                    }}
+                                }} else {{
+                                    targetButton.click();
+                                }}
+                            }}
+                        }};
+                        doc.addEventListener('keydown', window.scoringKeydownHandler);
+                        </script>
+                        """
+                        st.components.v1.html(js_shortcut, height=0, width=0)
+                    # ─────────────────────────────────────────────────────────
 
                     if btn_col1.button("🟢 正答(O)", key=f"ans_true_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "O"
@@ -350,6 +492,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         selected_score = "H"
 
                     st.write("")
+
 
                     memo_input = st.text_area(
                         "採点メモ / コメント", 
@@ -432,9 +575,13 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 # ─── 🔄 いずれかのボタンが押されたら自動でSupabaseへ保存 ───
                 if selected_score is not None:
                     try:
+                        # 💡 最後のレコードかどうかを正確に判定
+                        is_last_record = (current_index >= total_records - 1)
+
                         with st.spinner("Supabaseに保存中..."):
                             approver_id = st.session_state.get("user_id")
                             
+                            # 最後の判定結果をデータベースへ確実に先行保存
                             supabase.table("tbl_scoring_question_management") \
                                 .update({
                                     "judge_mark_result": selected_score,
@@ -445,18 +592,40 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                 .eq("grading_comp_date", selected_comp_date) \
                                 .execute()
                         
-                        if current_index < total_records - 1:
+                        if not is_last_record:
+                            # まだ後ろにレコードがある場合は通常通り次へ進む
                             st.toast(f"🟢 判定「{selected_score}」で正常に保存しました！", icon="✅")
                             st.session_state["selected_row_index"] = current_index + 1
+                            st.rerun()
                         else:
-                            st.balloons()
-                            st.toast("🎉 すべてのレコードの採点が完了しました！", icon="✨")
-                            st.session_state["selected_grader"] = None
-                            st.session_state["selected_response"] = None
-                            st.session_state["selected_comp_date"] = None
-                            st.session_state["selected_row_index"] = 0
-                            st.session_state["current_step"] = "select"
-                        st.rerun()
+                            # 💡 最後のレコードの場合、その場に2ボタン形式の確認ダイアログを起動
+                            @st.dialog("🎉 採点完了の確認")
+                            def show_finish_dialog():
+                                st.markdown("##### ✨ これで最後の採点が終了しました！")
+                                st.write("最終判定の保存は完了しています。このまま問題一覧画面に戻りますか？それとも内容を見直しますか？")
+                                st.write("（※そのまま **Enterキー** を押すと一覧に戻ります）")
+                                st.write("")
+                                
+                                # 横並びのフォームボタンを配置
+                                with st.form(key="finish_confirm_2btn_form", border=False):
+                                    submit_btn = st.form_submit_button("✅ このまま登録をして一覧に戻る", use_container_width=True)
+                                    if submit_btn:
+                                        # 💡 複雑なJSの干渉をすべて消去
+                                        st.balloons() # 完了演出
+                                        st.session_state["selected_grader"] = None
+                                        st.session_state["selected_response"] = None
+                                        st.session_state["selected_comp_date"] = None
+                                        st.session_state["selected_row_index"] = 0
+                                        st.session_state["current_step"] = "select"
+                                        st.rerun()
+                                
+                                # 2. サブアクション（見直し：フォームの外に置くことでEnter誤爆を防ぎ、クリック専用にします）
+                                if st.button("🔍 もう一度採点を見直す", use_container_width=True):
+                                    # 一覧に戻らず、ポップアップを閉じて現在の最後の問題画面を再描画する
+                                    st.rerun()
+                            
+                            # ダイアログを自動起動
+                            show_finish_dialog()
                         
                     except Exception as e:
                         st.error(f"データベースの更新に失敗しました: {e}")

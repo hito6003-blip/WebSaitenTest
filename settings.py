@@ -2,7 +2,7 @@
 IS_TEST_MODE = True  # 🧪 ローカルテスト時は True。本番リリース時はここを False にするだけでボタンが消滅します。
 
 # supabaseのストレージURL
-STORAGE_BASE_URL = ""
+STORAGE_BASE_URL = "https://npqjdhighfwmbfkfzfzt.supabase.co/storage/v1/object/public/correct_image"
 
 # settings.py
 # UI表示文字列を集中管理する辞書をここに置きます。

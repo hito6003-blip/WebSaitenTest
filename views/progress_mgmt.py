@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 
+try:
+    from master_cache import clear_master_cache, get_grader_master, get_scoring_group_master
+except ImportError:
+    from views.master_cache import clear_master_cache, get_grader_master, get_scoring_group_master
+
 # 📝 安全に操作ログ関数をインポート
 try:
     from log_common import insert_operation_log
@@ -31,26 +36,27 @@ def show_progress_management(supabase, settings, display_confirm_panel):
         return
 
     if st.button(settings.LABELS["refresh_button"], key="refresh_group_btn"):
+        clear_master_cache()
         st.rerun()
 
     try:
         with st.spinner("データを受信中..."):
             # 💡 1. ユーザー権限によるデータ絞り込み（特権4なら全体、それ以外は自グループ）
+            graders_data = get_grader_master(supabase)
             if user_role_id == 4:
-                group_members_query = supabase.table("graders").select("grader_id, grader_name, group_id")
+                group_members_data = graders_data
             else:
-                group_members_query = supabase.table("graders").select("grader_id, grader_name, group_id").eq("group_id", current_group_id)
-            
-            group_members = group_members_query.execute()
+                group_members_data = [
+                    row for row in graders_data if row.get("group_id") == current_group_id
+                ]
 
             # グループマスタキャッシュ作成
-            groups_res = supabase.table("scoring_groups").select("group_id, group_name").execute()
-            groups_data = groups_res.data or []
+            groups_data = get_scoring_group_master(supabase)
             group_map = {row["group_id"]: row["group_name"] for row in groups_data if row.get("group_id") is not None}
 
             # マッピングデータの構築
-            group_member_map = {m["grader_id"]: m.get("grader_name", "") for m in (group_members.data or []) if m.get("grader_id") is not None}
-            member_group_id_map = {m["grader_id"]: m.get("group_id") for m in (group_members.data or []) if m.get("grader_id") is not None}
+            group_member_map = {m["grader_id"]: m.get("grader_name", "") for m in group_members_data if m.get("grader_id") is not None}
+            member_group_id_map = {m["grader_id"]: m.get("group_id") for m in group_members_data if m.get("grader_id") is not None}
             member_ids = list(group_member_map.keys())
 
             if not member_ids:
@@ -90,32 +96,33 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                 )
                 df_summary = df_summary[['checker_webid', 'response_id', '採点数', '未採点問題数', '採点済問題数', 'grading_comp_date']]
                 df_summary.columns = ['採点者ID', '問題ID', '採点数', '未採点問題数', '採点済問題数', '採点完了日']
-                df_summary = df_summary.sort_values(by=['採点者ID', '採点完了日', '問題ID'], ascending=[True, True, True])
+                df_summary = df_summary.sort_values(by=['採点完了日', '採点者ID', '問題ID'], ascending=[True, True, True])
 
                 # メトリック表示
                 metric_label = "全体の担当総集計パターン数" if user_role_id == 4 else "グループ内の担当総集計パターン数"
                 st.metric(metric_label, len(df_summary))
                 
-                # 🔍 表示フィルターUI
                 st.markdown("##### 🔍 表示フィルター")
-                filter_col1, filter_col2, filter_col3 = st.columns([2.0, 2.0, 5.0])
+                # 💡 カラムの比率を調整して4つに分割
+                filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([2.0, 2.0, 2.5, 4.5])
                 
                 with filter_col1:
-                    show_active = st.checkbox("📝 要採点（未採点あり）", value=True, key="filter_show_active")
+                    show_active = st.checkbox("📝 要採点（未採点あり）を表示", value=True, key="filter_show_active")
                 with filter_col2:
-                    show_completed = st.checkbox("✅ 採点完了のみ", value=True, key="filter_show_completed")
-
+                    show_completed = st.checkbox("✅ 採点完了分を表示", value=True, key="filter_show_completed")
                 with filter_col3:
+                    # 💡 デフォルトOFF（False）でフィルターを追加
+                    show_expired = st.checkbox("⏰ 過去の採点完了日分を表示", value=False, key="filter_show_expired")
+
+                with filter_col4:
                     # 💡 gradersマスタからIDと名前のマッピングを高速生成
                     grader_name_map = {}
                     try:
-                        graders_res = supabase.table("graders").select("grader_id, grader_name").execute()
-                        if graders_res.data:
-                            for g_row in graders_res.data:
-                                g_id = g_row.get("grader_id")
-                                g_name = g_row.get("grader_name")
-                                if g_id:
-                                    grader_name_map[str(g_id).strip()] = str(g_name).strip() if g_name else ""
+                        for g_row in get_grader_master(supabase):
+                            g_id = g_row.get("grader_id")
+                            g_name = g_row.get("grader_name")
+                            if g_id:
+                                grader_name_map[str(g_id).strip()] = str(g_name).strip() if g_name else ""
                     except Exception as e:
                         st.warning(f"⚠️ 採点者マスタの取得に失敗しました: {e}")
 
@@ -141,13 +148,27 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                         key="admin_filter_selected_graders"
                     )
 
-                # 🧮 1. 進捗状況による第1次絞り込み
+                 # 🧮 1. 進捗状況による第1次絞り込み
                 if show_active and not show_completed:
                     df_summary = df_summary[df_summary['未採点問題数'] > 0]
                 elif show_completed and not show_active:
                     df_summary = df_summary[df_summary['未採点問題数'] == 0]
                 elif not show_active and not show_completed:
                     df_summary = df_summary.iloc[0:0]
+
+                                # 🧮 1.5. 採点完了日超過データの絞り込み
+                if not show_expired and not df_summary.empty:
+                    import datetime as dt_module
+                    # 本日の日付（YYYY-MM-DD）を取得
+                    today_str = dt_module.date.today().strftime("%Y-%m-%d")
+                    
+                    # 💡 初期状態（チェックOFF）：当日以降（未来）または 日付が空（未定）のもの「のみ」を表示
+                    is_future_or_empty = (
+                        (df_summary['採点完了日'].isna()) | 
+                        (df_summary['採点完了日'].astype(str).str.strip() == "") |
+                        (df_summary['採点完了日'] >= today_str)
+                    )
+                    df_summary = df_summary[is_future_or_empty]
 
                 # 🧮 2. 採点者IDによる第2次絞り込み
                 if selected_graders and grader_column_name in df_summary.columns:
