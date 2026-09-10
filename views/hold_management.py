@@ -133,26 +133,53 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                 df_summary.columns = ['対象採点者', '採点完了日', '問題', '採点総数', '採点済数', '保留残数', '保留対応数', '自対応数', '他対応数']
                 df_summary = df_summary[['対象採点者', '採点完了日', '問題', '採点総数', '採点済数', '保留残数', '保留対応数', '自対応数', '他対応数']]
 
-                # 💡 表示フィルターUI（未対応のみデフォルトでON、それ以外はOFFに初期化）
+                # 💡 表示フィルターUI（「過去の採点完了日分も表示」仕様の4大フィルター）
                 st.markdown("##### 🔍 保留データ表示フィルター")
-                f_col1, f_col2, f_col3 = st.columns(3)
+                f_col1, f_col2, f_col3, f_col4 = st.columns(4)
                 with f_col1:
-                    # 💡 「未対応の保留あり」は最初からチェックを入れる（value=True）
                     show_hold_active = st.checkbox("🔴 未対応の保留あり", value=True, key="filter_hold_active")
                 with f_col2:
-                    # 💡 「自分が対応済のみ」は最初からチェックを外す（value=False）
                     show_hold_my_done = st.checkbox("🔵 自分が対応済のみ", value=False, key="filter_hold_my_done")
                 with f_col3:
-                    # 💡 「自分以外が対応済のみ」は最初からチェックを外す（value=False）
                     show_hold_others_done = st.checkbox("🟢 自分以外が対応済のみ", value=False, key="filter_hold_others_done")
+                with f_col4:
+                    # 💡 【仕様変更】デフォルトはON（value=True）。過去データを含めて全部見せる状態からスタート
+                    show_hold_past_only = st.checkbox("🗃️ 過去の採点完了日分も表示", value=True, key="filter_hold_past_only")
 
+                # ─── 📊 チェックボックスの状態を掛け合わせてマスクを作成 ───
                 keep_mask = pd.Series(False, index=df_summary.index)
+                
+                # ① まず「未対応・自対応・他対応」のベースとなる3つの条件で拾い上げます
                 if show_hold_active:
                     keep_mask |= (df_summary['保留残数'] > 0)
                 if show_hold_my_done:
                     keep_mask |= (df_summary['自対応数'] > 0)
                 if show_hold_others_done:
                     keep_mask |= (df_summary['他対応数'] > 0)
+                    
+                # 💡 ② 【仕様の修正】チェックが外れた（False）場合のみ、今日を含めた未来日だけになるよう厳密ガード！
+                if not show_hold_past_only:
+                    try:
+                        # 本日（2026年9月10日）の日付を取得し、タイムスタンプ形式で比較できるようにします
+                        today_now = datetime.now()
+                        today_str = today_now.strftime('%Y-%m-%d')
+                        
+                        # 各データの完了日を安全に比較用の日付型に一時変換（未設定は今日扱いにして通す）
+                        def is_today_or_future(date_val):
+                            if pd.isna(date_val) or str(date_val).strip() == "" or str(date_val).strip() == "（未設定）":
+                                return True
+                            try:
+                                return str(date_val).strip() >= today_str
+                            except Exception:
+                                return True
+                        
+                        # 💡 今日を含めてそれより未来のレコードだけを「True（残す）」と判定するマスクを生成
+                        future_date_mask = df_summary['採点完了日'].apply(is_today_or_future)
+                        
+                        # ベースの条件と掛け算（AND）をすることで、過去日のデータを完全に消滅させます
+                        keep_mask = keep_mask & future_date_mask
+                    except Exception:
+                        pass
                     
                 df_summary = df_summary[keep_mask]
 

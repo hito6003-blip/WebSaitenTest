@@ -1,8 +1,36 @@
+import os
+import streamlit as st
+
 # settings.py などの環境設定ファイル
 IS_TEST_MODE = True  # 🧪 ローカルテスト時は True。本番リリース時はここを False にするだけでボタンが消滅します。
 
 # supabaseのストレージURL
-STORAGE_BASE_URL = "https://npqjdhighfwmbfkfzfzt.supabase.co/storage/v1/object/public/correct_image"
+# 💡 外部の設定からのみ、絶対にURLを取得する形に固定
+_url = os.environ.get("SUPABASE_STORAGE_URL", "").strip()
+
+if not _url:
+    # Renderでなければ、PCの secrets.toml から引っ張る
+    try:
+        _url = st.secrets["STORAGE_BASE_URL"].strip()
+    except:
+        _url = ""
+
+# 🚨 万が一、他のコードが localhost と決めつけていたらここで完全に上書きガード
+if _url:
+    if not _url.endswith("/"):
+        _url += "/"
+    STORAGE_BASE_URL = _url
+else:
+    # 何も設定が取れなかった場合の最低限の安全弁
+    STORAGE_BASE_URL = "https://supabase.co"
+
+# 🔍 デバッグ用：今どのURLが設定されたかをVS Codeのターミナルに強制表示させて確認する
+print(f"📦 [DEBUG] 現在システムが認識しているストレージURL: {STORAGE_BASE_URL}")
+
+
+
+# --- 残りの既存コード ---
+
 
 # settings.py
 # UI表示文字列を集中管理する辞書をここに置きます。
@@ -17,7 +45,7 @@ LABELS = {
 
     # タブラベル
     "tab1_label": "採点画面",
-    "tab2_group_label": "採点管理画面",
+    "tab2_group_label": "採点状況管理画面",
     "tab3_label": "CSVデータ取込画面",
     "tab4_label": "ファイルのアップロード & ダウンロード",
 

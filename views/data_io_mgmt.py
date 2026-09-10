@@ -13,7 +13,7 @@ def show_csv_import(supabase, settings):
     📄 タブ3: CSVデータ一括取り込み（採点問題管理テーブル用）
     複数CSVの安全パース、最新マッピングへのリネーム、および1,000件単位の分割バルクアップサートを制御します。
     """
-    st.header(settings.LABELS.get('tab3_header', 'CSVデータ一括取り込み'))
+    st.header(settings.LABELS.get('tab3_header', '採点振り分け情報付きデータアップロード'))
     st.markdown("**取り込みたいCSVフォルダ内のファイルをすべて選択するか、フォルダをそのまま以下の枠内にドラッグ＆ドロップしてください**")
     
     uploaded_files = st.file_uploader(
@@ -229,7 +229,7 @@ def show_data_io_management(supabase, settings):
     st.header("📥 採点用データ管理（出力＆AI結果反映）")
     
     # 📋 機能を2つのサブタブに綺麗に分割
-    tab5_sub1, tab5_sub2 = st.tabs(["CSV出力機能", "結果CSVアップロード登録"])
+    tab5_sub1, tab5_sub2 = st.tabs(["AI採点用データダウンロード", "AI採点結果アップロード"])
     
     # ==========================================================
     # 🟢 サブタブ1: CSV出力機能 (解答内容のダブルクォーテーション強制ラッピング)

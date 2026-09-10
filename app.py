@@ -208,7 +208,7 @@ else:
         visible_tab_labels.append("📤 採点完了データ出力") 
         visible_tab_keys.append("tab6")                         
     if show_tab7:
-        visible_tab_labels.append("🟣 保留（H）レコード管理")
+        visible_tab_labels.append("🟣 採点保留")
         visible_tab_keys.append("tab7")
     
     # 👑【新設】8番目のテスト管理タブを動的にマウント
