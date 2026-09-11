@@ -319,12 +319,11 @@ def show_data_io_management(supabase, settings):
                 except Exception as e:
                     st.error(f"データ抽出エラーが発生しました: {e}")
                     
-    # ==============================================================================
-    # 🔵 サブタブ2: 結果CSVアップロード登録 (AI 4項目のダブルクォーテーション囲み対応)
-    # ==============================================================================
+# ==============================================================================
+# 🔵 サブタブ2: 結果CSVアップロード登録 (AI 4項項目ダブルクォーテーション対応)
+# ==============================================================================
     with tab5_sub2:
         st.markdown("##### 2. 採点結果CSV of アップロード登録")
-        #st.markdown("AIの採点結果（`ai_cp1~3`, `ai_reason`）がダブルクォーテーションで囲まれた状態のCSVファイルをアップロードし、データベースを更新します。")
         st.info("⚠️ 取り込み可能なCSVファイルは **UTF-8（BOMあり）形式のみ** です。")
         
         required_cols_tab5 = [
@@ -346,8 +345,7 @@ def show_data_io_management(supabase, settings):
                 df_result_raw = None
                 try:
                     uploaded_result_file.seek(0)
-                    # 💡 【確定仕様】engine='python' にすることで、CSV側であらかじめダブルクォーテーションで
-                    # 囲まれた内側にある複雑な改行文章を、ちぎらずに1つのセルとして完璧にパース・ロードします。
+                    # 💡 engine='python' でダブルクォーテーション内の複雑な改行を完璧にパース
                     df_result_raw = pd.read_csv(
                         uploaded_result_file, 
                         encoding='utf-8-sig',
@@ -357,7 +355,7 @@ def show_data_io_management(supabase, settings):
                     st.error("❌ ファイルの文字コードが正しくありません。UTF-8（BOMあり）形式のCSVファイルをアップロードしてください。")
                 
                 if df_result_raw is not None:
-                    # 🚨 見えない制御文字（\r や半角スペース）を列名から100%完全に削ぎ落とす！
+                    # 🚨 列名から見えない制御文字やスペースを100%削ぎ落とす
                     df_result_raw.columns = df_result_raw.columns.str.strip()
                     
                     if df_result_raw.empty:
@@ -371,25 +369,25 @@ def show_data_io_management(supabase, settings):
                             df_result = pd.read_csv(
                                 uploaded_result_file, 
                                 encoding='utf-8-sig', 
-                                engine='python', # 💡 ここでも改行ちぎれバグを徹底ガード
+                                engine='python',
                                 dtype={
                                     'saiten_question_id': str, 'response_id': str, 'ai_cp1': str,
                                     'ai_cp2': str, 'ai_cp3': str, 'ai_reason': str, 'ai_judge_mark': str
                                 }
                             )
-                            # 列名を再度綺麗にトリム
                             df_result.columns = df_result.columns.str.strip()
 
-                            # 文字列の両端の空白を安全にトリム（💡 セルの内側にある改行は維持されます）
+                            # 文字列の両端の空白をトリム（内側の改行は維持）
                             df_result = df_result.apply(
                                 lambda col: col.map(lambda x: x.strip() if isinstance(x, str) else x)
                                 if col.dtype == object else col
                             )
                             df_result = df_result.drop_duplicates(subset=['saiten_question_id'])
 
+                            # 📊 画面表示用のプレビュー
                             st.write(f"📊 **読み込みプレビュー: {len(df_result)} 件のデータが正常にパースされました**")
                             st.dataframe(df_result.head(100), use_container_width=True)
-
+                            # ＝ ここから後半のデータベース登録処理 ＝
                             if st.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
                                 null_pk_result = df_result[df_result['saiten_question_id'].isna() | (df_result['saiten_question_id'] == '')]
                                 
@@ -399,14 +397,26 @@ def show_data_io_management(supabase, settings):
                                     csv_ids = df_result['saiten_question_id'].tolist()
                                     total_csv_count = len(csv_ids)
                                     
+                                    # 📌 DB検証時も1000件ずつのチャンクに分けて上限を回避
+                                    db_existing_ids = set()
+                                    chunk_size = 1000
+                                    
                                     with st.spinner("データの整合性を検証中..."):
-                                        response = supabase.table("tbl_scoring_question_management") \
-                                            .select("saiten_question_id") \
-                                            .in_("saiten_question_id", csv_ids) \
-                                            .execute()
-                                        
-                                        db_existing_ids = {row["saiten_question_id"] for row in response.data}
-                                        total_db_count = len(db_existing_ids)
+                                        try:
+                                            for i in range(0, len(csv_ids), chunk_size):
+                                                id_chunk = csv_ids[i:i + chunk_size]
+                                                response = supabase.table("tbl_scoring_question_management") \
+                                                    .select("saiten_question_id") \
+                                                    .in_("saiten_question_id", id_chunk) \
+                                                    .execute()
+                                                
+                                                for row in response.data:
+                                                    db_existing_ids.add(row["saiten_question_id"])
+                                                    
+                                            total_db_count = len(db_existing_ids)
+                                        except Exception as e:
+                                            st.error(f"❌ データベースの検証中にエラーが発生しました: {str(e)}")
+                                            total_db_count = 0
                                     
                                     if total_csv_count != total_db_count:
                                         missing_in_db = [id for id in csv_ids if id not in db_existing_ids]
@@ -418,41 +428,66 @@ def show_data_io_management(supabase, settings):
                                         current_utc_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                                         df_result['updated_at'] = current_utc_time
 
-                                        records_to_update = df_result.where(pd.notnull(df_result), None).to_dict(orient="records")
+                                        # 📌 DBに登録する列を固定（余計な列を巻き込まない）
+                                        columns_to_db = [
+                                            "saiten_question_id", "ai_cp1", "ai_cp2", "ai_cp3", 
+                                            "ai_reason", "ai_judge_mark", "updated_at"
+                                        ]
+                                        df_to_sync = df_result[columns_to_db].copy()
+
+                                        # 🚨 【最重要修正】NoneオブジェクトやNaN欠損値をすべて「（登録なし）」に変換
+                                        df_to_sync = df_to_sync.fillna("（登録なし）") 
+                                        
+                                        # 🚨 文字列としての "None" や 空文字 "" も見逃さずに「（登録なし）」に上書き
+                                        df_to_sync = df_to_sync.replace(["None", "none", ""], "（登録なし）")
+                                        
+                                        # 🚨 スペースのみ（半角・全角）のセルも「（登録なし）」に強制置換
+                                        df_to_sync = df_to_sync.replace(r'^\s*$', '（登録なし）', regex=True)
+
+                                        # 辞書データのリスト（JSON形式）に変換
+                                        records_to_update = df_to_sync.to_dict(orient="records")
                                         
                                         with st.spinner("Supabaseのデータを更新中..."):
-                                            chunk_size = 1000
                                             total_updated = 0
+                                            error_occurred = False
                                             
                                             for i in range(0, len(records_to_update), chunk_size):
                                                 chunk = records_to_update[i:i + chunk_size]
-                                                supabase.table("tbl_scoring_question_management").upsert(
-                                                    chunk, on_conflict="saiten_question_id", ignore_duplicates=False
-                                                ).execute()
-                                                total_updated += len(chunk)
+                                                try:
+                                                    supabase.table("tbl_scoring_question_management").upsert(
+                                                        chunk, on_conflict="saiten_question_id", ignore_duplicates=False
+                                                    ).execute()
+                                                    total_updated += len(chunk)
+                                                except Exception as upsert_err:
+                                                    st.error(f"❌ チャンク更新中にエラーが発生しました（インデックス {i}〜）: {str(upsert_err)}")
+                                                    st.code(str(upsert_err))
+                                                    error_occurred = True
+                                                    break  # エラー時は安全のために処理を中断
                                             
-                                            # 📝 【操作ログ】AI結果インポート成功の履歴を監査ログへ刻印
-                                            current_user_id = st.session_state.get("user_id", "UNKNOWN_USER")
-                                            try:
-                                                from log_common import insert_operation_log
-                                                insert_operation_log(
-                                                    supabase=supabase,
-                                                    operator_id=current_user_id,
-                                                    action_type="AI_RESULT_IMPORT",
-                                                    target_id=str(uploaded_result_file.name),
-                                                    description=f"AI採点結果CSVのインポート成功（対象: {total_updated} 件）。ダブルクォーテーションで保護されたAI理由・チェックポイントをパースしてDBを確定しました。"
-                                                )
-                                            except Exception:
-                                                pass
-                                            
-                                            st.success(f"✅ 合計 {total_updated} 件のAI採点結果（更新日時含む）を正常に反映・更新しました！")
-                                            
-                                            import time as time_module
-                                            time_module.sleep(1.0)
-                                            st.rerun()
-                                                        
+                                            if not error_occurred:
+                                                # 📝 【操作ログ】AI結果インポート成功の履歴を監査ログへ刻印
+                                                current_user_id = st.session_state.get("user_id", "UNKNOWN_USER")
+                                                try:
+                                                    from log_common import insert_operation_log
+                                                    insert_operation_log(
+                                                        supabase=supabase,
+                                                        operator_id=current_user_id,
+                                                        action_type="AI_RESULT_IMPORT",
+                                                        target_id=str(uploaded_result_file.name),
+                                                        description=f"AI採点結果CSVのインポート成功（対象: {total_updated} 件）。ダブルクォーテーションで保護されたAI理由・チェックポイントをパースしてDBを確定しました。"
+                                                    )
+                                                except Exception:
+                                                    pass
+                                                
+                                                st.success(f"✅ 合計 {total_updated} 件のAI採点結果（更新日時含む）を正常に反映・更新しました！")
+                                                
+                                                import time as time_module
+                                                time_module.sleep(1.0)
+                                                st.rerun()
+                                                            
             except Exception as upload_err:
                 st.error(f"❌ ファイル処理中にエラーが発生しました: {str(upload_err)}")
+
 
 # 💡 views/data_io_mgmt.py の一番最後（ファイルの最末尾）にこれをそのまま貼り付けてください
 def show_graded_output(supabase):
