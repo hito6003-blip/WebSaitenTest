@@ -13,11 +13,11 @@ def show_csv_import(supabase, settings):
     📄 タブ3: CSVデータ一括取り込み（採点問題管理テーブル用）
     複数CSVの安全パース、最新マッピングへのリネーム、および1,000件単位の分割バルクアップサートを制御します。
     """
-    st.header(settings.LABELS.get('tab3_header', '採点振り分け情報付きデータアップロード'))
-    st.markdown("**取り込みたいCSVフォルダ内のファイルをすべて選択するか、フォルダをそのまま以下の枠内にドラッグ＆ドロップしてください**")
+    st.header(settings.LABELS["tab3_header"])
+    st.markdown(settings.LABELS["csv_import_description"])
     
     uploaded_files = st.file_uploader(
-        "取り込むCSVフォルダ内のファイルをまとめて選択・ドロップしてください", 
+        settings.LABELS["csv_folder_uploader"],
         type=["csv"],
         accept_multiple_files=True,
         key="csv_folder_uploader"
@@ -46,7 +46,7 @@ def show_csv_import(supabase, settings):
                         continue
                 
                 if df_raw is None or df_raw.empty:
-                    st.warning(f"⚠️ {uploaded_file.name} は読み込めないか、空のためスキップしました。")
+                    st.warning(settings.LABELS["csv_read_skip"].format(file=uploaded_file.name))
                     continue
                 
                 # 🚨 【今回の最重要対策】見えない制御文字（\r や半角スペース）を列名から100%完全に削ぎ落とす！
@@ -63,7 +63,7 @@ def show_csv_import(supabase, settings):
                 # CSVのカラムをチェック
                 missing_columns = [col for col in required_columns if col not in df_raw.columns]
                 if missing_columns:
-                    st.error(f"❌ {uploaded_file.name} に必須カラムが不足しています: {', '.join(missing_columns)}")
+                    st.error(settings.LABELS["csv_missing_columns"].format(file=uploaded_file.name, columns=', '.join(missing_columns)))
                     return
                 
                 # 💡 【型指定再読み込み時も改行＆列名トリムを徹底適用】
@@ -94,7 +94,7 @@ def show_csv_import(supabase, settings):
                 all_dfs.append(df_file)
             
             if not all_dfs:
-                st.warning("有効なCSVデータがありませんでした。")
+                st.warning(settings.LABELS["csv_no_valid_data"])
                 return
                 
             df = pd.concat(all_dfs, ignore_index=True)
@@ -107,14 +107,14 @@ def show_csv_import(supabase, settings):
                 elif msg_type == 'warning': st.warning(msg)
                 elif msg_type == 'error': st.error(msg)
                 else: st.info(msg)
-            st.write(f"📂 読み込んだファイル数: **{len(uploaded_files)} 個**")
-            st.write(f"📊 **全ファイル合計プレビュー: {len(df)}件のデータが統合されました**")
+            st.write(settings.LABELS["csv_file_count"].format(count=len(uploaded_files)))
+            st.write(settings.LABELS["csv_total_preview"].format(count=len(df)))
             preview_df = df.copy()
             preview_df.index = range(1, len(preview_df) + 1)
             st.dataframe(preview_df, use_container_width=True)
             
             if not df.empty:
-                if st.button(settings.LABELS.get('db_insert_btn', '全ファイルをまとめて登録'), key="tab3_insert_btn", use_container_width=True):
+                if st.button(settings.LABELS["db_insert_btn"], key="tab3_insert_btn", use_container_width=True):
                     # 💡 最新のDBカラム名へマッピング変換（TAOデータ出力日 ➡️ tao_outdate 対応）
                     rename_dict = {
                         '採点問題ID': 'saiten_question_id',
@@ -154,7 +154,7 @@ def show_csv_import(supabase, settings):
                         records = df_db.where(pd.notnull(df_db), None).to_dict(orient="records")
                         duplicate_count = len(df) - len(df_db)
 
-                        with st.spinner("すべてのデータを一括登録中..."):
+                        with st.spinner(settings.LABELS["csv_success_registering"]):
                             try:
                                 # ⚡ 1,000件ずつの安全分割コミットロジック（Gateway Timeoutの粉砕）
                                 chunk_size = 1000
@@ -212,9 +212,9 @@ def show_file_io_sample(settings):
     uploaded_file = st.file_uploader(settings.LABELS['file_uploader'], type=["csv", "txt", "xlsx"])
 
     if uploaded_file is not None:
-        st.success(f"アップロード完了: {uploaded_file.name}")
+        st.success(settings.LABELS["file_upload_complete"].format(file=uploaded_file.name))
         bytes_data = uploaded_file.getvalue()
-        st.write("ファイルサイズ:", len(bytes_data), "bytes")
+        st.write(settings.LABELS["file_size_label"], len(bytes_data), "bytes")
 
     st.header(settings.LABELS['download_header'])
     sample_text = "これはサンプルテキストです。\n必要に応じて内容を更新して保存してください。"
@@ -226,20 +226,20 @@ def show_data_io_management(supabase, settings):
     """
     📥 タブ5: 採点用データ出力・結果アップロード
     """
-    st.header("📥 採点用データ管理（出力＆AI結果反映）")
+    st.header(settings.LABELS["data_io_title"])
     
     # 📋 機能を2つのサブタブに綺麗に分割
-    tab5_sub1, tab5_sub2 = st.tabs(["AI採点用データダウンロード", "AI採点結果アップロード"])
+    tab5_sub1, tab5_sub2 = st.tabs([settings.LABELS["ai_download_tab"], settings.LABELS["ai_upload_tab"]])
     
     # ==========================================================
     # 🟢 サブタブ1: CSV出力機能 (解答内容のダブルクォーテーション強制ラッピング)
     # ==========================================================
     with tab5_sub1:
-        st.markdown("##### 1. 未処理データの出力")
+        st.markdown(settings.LABELS["unprocessed_export"])
         #st.markdown("`tbl_scoring_question_management` テーブルから、AI採点判定（`ai_judge_mark`）が**未登録（Null）**のレコードを抽出してCSV形式でダウンロードします。")
         
-        if st.button("🔍 対象データを抽出・プレビュー", key="tab5_fetch_btn", use_container_width=True):
-            with st.spinner("データベースから未登録データを抽出中..."):
+        if st.button(settings.LABELS["fetch_unprocessed"], key="tab5_fetch_btn", use_container_width=True):
+            with st.spinner(settings.LABELS["loading_unprocessed"]):
                 try:
                     response = supabase.table("tbl_scoring_question_management") \
                         .select("saiten_question_id, response_id, answer, answer_strnum, ai_judge_mark") \
@@ -252,7 +252,7 @@ def show_data_io_management(supabase, settings):
                         target_columns = ["saiten_question_id", "response_id", "answer", "answer_strnum"]
                         df_export = df_export[target_columns]
 
-                        st.success(f"🎯 未登録のレコードが **{len(df_export)} 件** 見つかりました。")
+                        st.success(settings.LABELS["unprocessed_found"].format(count=len(df_export)))
                         
                         # 💡 【エラー100%永久消滅 ＆ バックスラッシュゼロ型・完全テキスト組み立て仕様】
                         # ライブラリの制約を完全にバイパスし、プレーンな文字列結合だけでCSVを1行ずつ直接生成します
@@ -301,7 +301,7 @@ def show_data_io_management(supabase, settings):
                             pass
 
                         st.download_button(
-                            label="📥 抽出データをCSVでダウンロード",
+                            label=settings.LABELS["download_csv"],
                             data=csv_data,
                             file_name=filename,
                             mime="text/csv",
@@ -309,33 +309,33 @@ def show_data_io_management(supabase, settings):
                             key="tab5_download_btn"
                         )
 
-                        st.markdown("##### 📊 抽出データプレビュー（先頭最大100件）")
+                        st.markdown(settings.LABELS["unprocessed_preview"])
                         df_preview = df_export.head(100).copy()
                         df_preview.index = df_preview.index + 1
                         st.dataframe(df_preview, use_container_width=True)
                     else:
-                        st.info("✨ 現在、AI採点判定（`ai_judge_mark`）が未登録のレコードはありません。")
+                        st.info(settings.LABELS["unprocessed_none"])
 
                 except Exception as e:
-                    st.error(f"データ抽出エラーが発生しました: {e}")
+                    st.error(settings.LABELS["csv_data_error"].format(error=e))
                     
 # ==============================================================================
 # 🔵 サブタブ2: 結果CSVアップロード登録 (AI 4項項目ダブルクォーテーション対応)
 # ==============================================================================
     with tab5_sub2:
-        st.markdown("##### 2. 採点結果CSV of アップロード登録")
-        st.info("⚠️ 取り込み可能なCSVファイルは **UTF-8（BOMあり）形式のみ** です。")
+        st.markdown(settings.LABELS["csv_format_title"])
+        st.info(settings.LABELS["csv_utf8_only"])
         
         required_cols_tab5 = [
             "saiten_question_id", "response_id", "ai_cp1", "ai_cp2", "ai_cp3", "ai_reason", "ai_judge_mark"
         ]
         
-        with st.expander("詳細なCSVフォーマット要件を確認する"):
-            st.write("以下の**7つのカラム**がすべて含まれている必要があります（並び順は自由です）。")
+        with st.expander(settings.LABELS["csv_format_details"]):
+            st.write(settings.LABELS["csv_required_columns"])
             st.code(",".join(required_cols_tab5))
         
         uploaded_result_file = st.file_uploader(
-            "採点結果CSVファイルを選択してください", 
+            settings.LABELS["result_csv_uploader"],
             type=["csv"],
             key="tab5_result_csv_uploader"
         )
@@ -352,18 +352,18 @@ def show_data_io_management(supabase, settings):
                         engine='python'
                     )
                 except (UnicodeDecodeError, LookupError):
-                    st.error("❌ ファイルの文字コードが正しくありません。UTF-8（BOMあり）形式のCSVファイルをアップロードしてください。")
+                    st.error(settings.LABELS["invalid_encoding"])
                 
                 if df_result_raw is not None:
                     # 🚨 列名から見えない制御文字やスペースを100%削ぎ落とす
                     df_result_raw.columns = df_result_raw.columns.str.strip()
                     
                     if df_result_raw.empty:
-                        st.warning("⚠️ アップロードされたファイルは空です。")
+                        st.warning(settings.LABELS["empty_upload"])
                     else:
                         missing_cols = [col for col in required_cols_tab5 if col not in df_result_raw.columns]
                         if missing_cols:
-                            st.error(f"❌ 必須カラムが不足しています: {', '.join(missing_cols)}")
+                            st.error(settings.LABELS["required_columns_missing"].format(columns=', '.join(missing_cols)))
                         else:
                             uploaded_result_file.seek(0)
                             df_result = pd.read_csv(
@@ -385,14 +385,14 @@ def show_data_io_management(supabase, settings):
                             df_result = df_result.drop_duplicates(subset=['saiten_question_id'])
 
                             # 📊 画面表示用のプレビュー
-                            st.write(f"📊 **読み込みプレビュー: {len(df_result)} 件のデータが正常にパースされました**")
+                            st.write(settings.LABELS["result_preview"].format(count=len(df_result)))
                             st.dataframe(df_result.head(100), use_container_width=True)
                             # ＝ ここから後半のデータベース登録処理 ＝
-                            if st.button("🔥 採点結果をデータベースに登録（一括更新）", key="tab5_insert_btn", use_container_width=True):
+                            if st.button(settings.LABELS["result_registration"], key="tab5_insert_btn", use_container_width=True):
                                 null_pk_result = df_result[df_result['saiten_question_id'].isna() | (df_result['saiten_question_id'] == '')]
                                 
                                 if len(null_pk_result) > 0:
-                                    st.error(f"❌ `saiten_question_id` が空の行が {len(null_pk_result)} 件あります。これらは登録できません。")
+                                    st.error(settings.LABELS["empty_primary_keys"].format(count=len(null_pk_result)))
                                 else:
                                     csv_ids = df_result['saiten_question_id'].tolist()
                                     total_csv_count = len(csv_ids)
@@ -401,7 +401,7 @@ def show_data_io_management(supabase, settings):
                                     db_existing_ids = set()
                                     chunk_size = 1000
                                     
-                                    with st.spinner("データの整合性を検証中..."):
+                                    with st.spinner(settings.LABELS["result_integrity_check"]):
                                         try:
                                             for i in range(0, len(csv_ids), chunk_size):
                                                 id_chunk = csv_ids[i:i + chunk_size]
@@ -415,14 +415,14 @@ def show_data_io_management(supabase, settings):
                                                     
                                             total_db_count = len(db_existing_ids)
                                         except Exception as e:
-                                            st.error(f"❌ データベースの検証中にエラーが発生しました: {str(e)}")
+                                            st.error(settings.LABELS["result_data_error"].format(error=str(e)))
                                             total_db_count = 0
                                     
                                     if total_csv_count != total_db_count:
                                         missing_in_db = [id for id in csv_ids if id not in db_existing_ids]
-                                        st.error(f"❌ 更新対象のデータがデータベースに存在しないため、処理を中断しました。新規追加は許可されていません。")
-                                        st.error(f"💡 存在しない採点問題ID（先頭最大5件を表示）: {', '.join(missing_in_db[:5])}")
-                                        st.warning(f"⚠️ CSVの件数（{total_csv_count}件）に対し、DBに存在するデータは（{total_db_count}件）しかありませんでした。")
+                                        st.error(settings.LABELS["missing_db_records"])
+                                        st.error(settings.LABELS["missing_ids"].format(ids=', '.join(missing_in_db[:5])))
+                                        st.warning(settings.LABELS["csv_count_mismatch"].format(csv_count=total_csv_count, db_count=total_db_count))
                                     else:
                                         # 💡 現在の正確なUTC日時をISOフォーマット（末尾Z）で取得して更新日時を付与
                                         current_utc_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -447,7 +447,7 @@ def show_data_io_management(supabase, settings):
                                         # 辞書データのリスト（JSON形式）に変換
                                         records_to_update = df_to_sync.to_dict(orient="records")
                                         
-                                        with st.spinner("Supabaseのデータを更新中..."):
+                                        with st.spinner(settings.LABELS["result_db_update"]):
                                             total_updated = 0
                                             error_occurred = False
                                             
@@ -459,7 +459,7 @@ def show_data_io_management(supabase, settings):
                                                     ).execute()
                                                     total_updated += len(chunk)
                                                 except Exception as upsert_err:
-                                                    st.error(f"❌ チャンク更新中にエラーが発生しました（インデックス {i}〜）: {str(upsert_err)}")
+                                                    st.error(settings.LABELS["result_update_error"].format(index=i, error=str(upsert_err)))
                                                     st.code(str(upsert_err))
                                                     error_occurred = True
                                                     break  # エラー時は安全のために処理を中断
@@ -479,28 +479,28 @@ def show_data_io_management(supabase, settings):
                                                 except Exception:
                                                     pass
                                                 
-                                                st.success(f"✅ 合計 {total_updated} 件のAI採点結果（更新日時含む）を正常に反映・更新しました！")
+                                                st.success(settings.LABELS["result_update_success"].format(count=total_updated))
                                                 
                                                 import time as time_module
                                                 time_module.sleep(1.0)
                                                 st.rerun()
                                                             
             except Exception as upload_err:
-                st.error(f"❌ ファイル処理中にエラーが発生しました: {str(upload_err)}")
+                st.error(settings.LABELS["csv_processing_error"].format(error=str(upload_err)))
 
 
 # 💡 views/data_io_mgmt.py の一番最後（ファイルの最末尾）にこれをそのまま貼り付けてください
-def show_graded_output(supabase):
+def show_graded_output(supabase, settings):
     """
     📤 タブ6: 採点完了データ出力 (分割お渡し・完全版 1/4)
     採点完了日単位で全ての採点が終わっている日のみを抽出し、
     複数日を選択して日付昇順で1本の高精度クレンジングCSVとして一括出力する画面です。
     """
-    st.header("📤 採点完了データ出力")
-    st.markdown("採点完了日ごとに集計を行い、**すべての採点が完了している日付のデータのみ**を選択してCSVダウンロードできます。")
+    st.header(settings.LABELS["export_title"])
+    st.markdown(settings.LABELS["export_description"])
 
     # 1. 🔄 画面ロード時に最新の全データを一気に対称ロードしてメモリ上で集計
-    with st.spinner("データベースから最新の採点状況を集計中..."):
+    with st.spinner(settings.LABELS["graded_export_loading"]):
         try:
             # 仕様書通り「contents_id」を確実に含めてロード
             all_res = supabase.table("tbl_scoring_question_management") \
@@ -528,11 +528,11 @@ def show_graded_output(supabase):
                 pass # ログテーブル読み込み不可時のセーフティ
 
         except Exception as e:
-            st.error(f"データの読み込みに失敗しました: {e}")
+            st.error(settings.LABELS["graded_export_error"].format(error=e))
             return
 
     if not all_data:
-        st.info("💡 データベースにレコードが存在しません。")
+        st.info(settings.LABELS["graded_export_no_data"])
         return
 
     df_all = pd.DataFrame(all_data)
@@ -574,31 +574,31 @@ def show_graded_output(supabase):
         })
 
     if not summary_records:
-        st.info("💡 集計対象となる有効な採点完了日（日付データ）がありません。")
+        st.info(settings.LABELS["graded_export_no_dates"])
         return
 
     df_summary = pd.DataFrame(summary_records)
 
-    st.markdown("### 📅 採点完了日ごとの集計一覧")
+    st.markdown(settings.LABELS["export_date_list"])
 
     # 表示フィルター
     filter_col1, _ = st.columns(2)
     with filter_col1:
         status_filter = st.radio(
-            "🔍 表示フィルター",
-            ["すべて表示", "🟢 出力可能 のみ", "🔴 出力不可 のみ"],
+            settings.LABELS["display_filter"].replace("##### ", ""),
+            [settings.LABELS["graded_filter_all"], settings.LABELS["graded_filter_available"], settings.LABELS["graded_filter_unavailable"]],
             horizontal=True,
             key="tab6_status_filter_radio"
         )
     
-    if status_filter == "🟢 出力可能 のみ":
+    if status_filter == settings.LABELS["graded_filter_available"]:
         df_display = df_summary[df_summary["出力判定ステータス"].str.contains("✅")]
-    elif status_filter == "🔴 出力不可 のみ":
+    elif status_filter == settings.LABELS["graded_filter_unavailable"]:
         df_display = df_summary[df_summary["出力判定ステータス"].str.contains("❌")]
     else:
         df_display = df_summary
 
-    st.caption(f"表示中: {len(df_display)} 件 / 全件: {len(df_summary)} 件")
+    st.caption(settings.LABELS["graded_display_count"].format(displayed=len(df_display), total=len(df_summary)))
 
     # 3. 🗂️ チェックボックス選択エディタ
     edited_df = st.data_editor(
@@ -614,11 +614,11 @@ def show_graded_output(supabase):
         st.session_state["tab6_target_dates"] = []
 
     # 選択データをCSV生成ステージに送り込む
-    if st.button("🔍 選択した日付の採点完了データを抽出する", key="tab6_extract_action_btn", use_container_width=True):
+    if st.button(settings.LABELS["extract_selected_dates"], key="tab6_extract_action_btn", use_container_width=True):
         selected_dates = edited_df[edited_df["選択"] == True]["採点完了日"].tolist()
 
         if not selected_dates:
-            st.warning("⚠️ 出力したい採点完了日の「選択」チェックボックスにチェックを入れてください。")
+            st.warning(settings.LABELS["select_export_date"])
             st.session_state["tab6_selected_valid_df"] = None
         else:
             valid_dates = edited_df[(edited_df["選択"] == True) & (edited_df["出力判定ステータス"].str.contains("✅"))]["採点完了日"].tolist()
@@ -626,7 +626,7 @@ def show_graded_output(supabase):
             
             if invalid_selected:
                 error_details = [f"・{inv} ： {edited_df[edited_df['採点完了日'] == inv]['出力判定ステータス'].values}" for inv in invalid_selected]
-                st.error("❌ 選択された日付の中に、まだ採点作業が完了していない日付が含まれています。")
+                st.error(settings.LABELS["graded_invalid_date"])
                 for detail in error_details:
                     st.markdown(f"**{detail}**")
                 st.session_state["tab6_selected_valid_df"] = None
@@ -643,7 +643,7 @@ def show_graded_output(supabase):
     df_valid_sorted = st.session_state.get("tab6_selected_valid_df")
     valid_dates = st.session_state.get("tab6_target_dates", [])
     if df_valid_sorted is not None and not df_valid_sorted.empty:
-        st.success(f"🎯 出力準備完了: **{len(df_valid_sorted)} 件** （対象日: {valid_dates}）")
+        st.success(settings.LABELS["graded_ready"].format(count=len(df_valid_sorted), dates=valid_dates))
 
         csv_lines = []
         # 📋【新仕様】ご提示いただいた全11項目の日本語ヘッダーを完全再現
@@ -700,7 +700,7 @@ def show_graded_output(supabase):
         filename = f"graded_all_p_output_{current_time_str}.csv"
 
         st.markdown("---")
-        st.write("📢 **ステップ1: ファイルのダウンロード**")
+        st.write(settings.LABELS["download_step"])
         st.download_button(
             label="📥 選択した採点完了データを結合CSVでダウンロード",
             data=final_csv_bytes,
@@ -710,10 +710,10 @@ def show_graded_output(supabase):
             key="tab6_final_download_btn"
         )
 
-        st.write("📢 **ステップ2: システムへの完了報告**")
-        if st.button("🔥 上記データのダウンロード完了をシステムに確定報告（出力済に更新）", key="tab6_commit_btn", use_container_width=True):
+        st.write(settings.LABELS["commit_step"])
+        if st.button(settings.LABELS["commit_export"], key="tab6_commit_btn", use_container_width=True):
             try:
-                with st.spinner("操作監査ログに一括確定を刻印中..."):
+                with st.spinner(settings.LABELS["graded_commit_loading"]):
                     login_user = st.session_state.get("user_id", "ADMIN_USER")
                     valid_pkey_list = df_valid_sorted["saiten_question_id"].tolist()
 
@@ -736,14 +736,14 @@ def show_graded_output(supabase):
                     
                     st.session_state["tab6_selected_valid_df"] = None
                     st.session_state["tab6_target_dates"] = []
-                    st.toast("✅ 監査操作ログにミリ秒刻印し、出力ステータスを同期しました！", icon="🚀")
+                    st.toast(settings.LABELS["graded_commit_success"], icon="🚀")
                     time.sleep(1.0)
                     st.rerun()
 
             except Exception as commit_err:
-                st.error(f"確定報告処理中にエラーが発生しました: {commit_err}")
+                st.error(settings.LABELS["graded_commit_error"].format(error=commit_err))
 
-        st.markdown("##### 📝 出力対象データ プレビュー (先頭50件)")
+        st.markdown(settings.LABELS["graded_preview"])
         df_preview = df_valid_sorted.copy()
         
         def clean_preview_app_id(val):

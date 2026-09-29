@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+import importlib
 from datetime import datetime, timezone
 from supabase import create_client
 
@@ -17,6 +18,8 @@ st.set_page_config(
 # ⚙️ settingsモジュールのインポート
 try:
     import settings
+    # Streamlitの再実行で古いsettingsモジュールが再利用されないよう、常に最新ファイルを反映します。
+    settings = importlib.reload(settings)
 except ImportError:
     st.error("❌ settings.py が見つかりません。設定ファイルを作成してください。")
     st.stop()
@@ -93,10 +96,10 @@ def display_confirm_panel(message, pending_key, container=st):
         st.warning(message)
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("✅ はい、実行します", key=f"confirm_yes_{pending_key}", use_container_width=True):
+            if st.button(settings.LABELS["confirm_yes"], key=f"confirm_yes_{pending_key}", use_container_width=True):
                 return True
         with c2:
-            if st.button("❌ いいえ、戻ります", key=f"confirm_no_{pending_key}", use_container_width=True):
+            if st.button(settings.LABELS["confirm_no"], key=f"confirm_no_{pending_key}", use_container_width=True):
                 return False
     return None
 
@@ -131,7 +134,7 @@ else:
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
                 
-            st.error(f"⏳ 一定時間操作がなかったため、安全のため自動ログアウトし、編集ロックをすべて解放しました。")
+            st.error(settings.LABELS["login_timeout"])
             st.rerun()
 
             
@@ -139,11 +142,11 @@ else:
     # ─── 📊 共通ヘッダーエリア ───
     col_title, col_logout = st.columns([4, 1])
     with col_title:
-        st.markdown("## 📊 試験データ管理システム")
-        st.caption(f"ログイン中: {current_user_name} (採点者ID: {current_user_id}) / Role: {current_role_id}")
+        st.markdown(settings.LABELS["app_title"])
+        st.caption(settings.LABELS["logged_in_user"].format(name=current_user_name, user_id=current_user_id, role=current_role_id))
     with col_logout:
         st.write("") 
-        if st.button("ログアウト", use_container_width=True, key="main_logout_btn"):
+        if st.button(settings.LABELS["logout"], use_container_width=True, key="main_logout_btn"):
             try:
                 if current_user_id:
                     # 1. 採点者のログインステータスをオフにする
@@ -273,7 +276,7 @@ else:
         if selected_tab == "tab6":
             with tab_map[selected_tab]:
                 from views.data_io_mgmt import show_graded_output
-                show_graded_output(supabase)
+                show_graded_output(supabase, settings)
                 
         if selected_tab == "tab7":
             with tab_map[selected_tab]:
@@ -284,7 +287,7 @@ else:
         if selected_tab == "tab8":
             with tab_map[selected_tab]:
                 st.markdown("### 🛠️ テスト用デバッグ管理")
-                st.markdown("このタブは特権管理者（role_id=4）にのみ露出する安全な検証エリアです。")
+                st.markdown(settings.LABELS["debug_tab_description"])
                 
                 # 💡 トグルスイッチでテストモードのON/OFFを完全コントロール！
                 # 他の画面や settings.py を一切書き換えることなく、この状態がシステム全体に安全連動します。
@@ -296,20 +299,20 @@ else:
                 st.session_state["is_test_mode_active"] = is_test
 
                 if is_test:
-                    st.success("🟢 現在テストモードが【有効】です。個別採点ページ等でテスト用の拡張操作が行えます。")
+                    st.success(settings.LABELS["test_mode_enabled"])
                     
                     # 💡 先ほど作成した「問題テーブル全削除ツール」をここにマウント！
                     # テストモードがONの時だけ、この下に物理削除ボタンが綺麗に出現します。
                     try:
                         from views.progress_mgmt import show_danger_zone_test_tools
-                        show_danger_zone_test_tools(supabase)
+                        show_danger_zone_test_tools(supabase, settings)
                     except ImportError:
                         # まだ views/progress_mgmt.py 内に関数を定義していない場合のセーフティフォールバック
-                        st.caption("ℹ️ テーブル全削除ロジック関数は、views/progress_mgmt.py 内への配置をお待ちしています。")
+                        st.caption(settings.LABELS["test_tool_missing"])
                 else:
-                    st.info("⚪ 現在は通常の本番モードです。検証用の破壊的ツールは安全に封印されています。")
+                    st.info(settings.LABELS["test_mode_disabled"])
     else:
-        st.warning(f"表示対象のタブがありません。管理者にお問い合わせください。(role_id: {current_role_id})")
+        st.warning(settings.LABELS["no_visible_tabs"].format(role_id=current_role_id))
         tab_map = {}
 
         

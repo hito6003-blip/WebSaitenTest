@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 import streamlit as st
 from zoneinfo import ZoneInfo
+from views.log_common import insert_operation_log
 
 try:
     from master_cache import (
@@ -43,7 +44,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
     current_user_id = st.session_state.get("user_id", "UNKNOWN_USER")
     
     if user_role_id != 4 and current_group_id is None:
-        st.warning("あなたの所属グループ情報がありません。管理者にお問い合わせください。")
+        st.warning(settings.LABELS["no_group"])
         return
 
     if st.button(settings.LABELS["refresh_button"], key="refresh_group_btn"):
@@ -51,7 +52,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
         st.rerun()
 
     try:
-        with st.spinner("データを受信中..."):
+        with st.spinner(settings.LABELS["loading_data"]):
             # 採点者・グループは全画面共通の短時間キャッシュを利用します。
             all_graders = get_grader_master(supabase)
             if user_role_id == 4:
@@ -70,7 +71,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
             member_ids = list(group_member_map.keys())
 
             if not member_ids:
-                st.info("対象の採点者が見つかりません。")
+                st.info(settings.LABELS["no_graders"])
                 return
 
             dropdown_labels = []
@@ -110,20 +111,20 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                 df_summary.columns = ['採点者ID', '問題ID', '採点数', '未採点問題数', '採点済問題数', '採点保留数', '採点完了日']
                 df_summary = df_summary.sort_values(by=['採点完了日', '採点者ID', '問題ID'], ascending=[True, True, True])
                 # メトリック表示
-                metric_label = "全体の担当総集計パターン数" if user_role_id == 4 else "グループ内の担当総集計パターン数"
+                metric_label = settings.LABELS["all_pattern_count"] if user_role_id == 4 else settings.LABELS["group_pattern_count"]
                 st.metric(metric_label, len(df_summary))
                 
-                st.markdown("##### 🔍 表示フィルター")
+                st.markdown(settings.LABELS["display_filter"])
                 # 💡 カラムの比率を調整して4つに分割
                 filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([2.0, 2.0, 2.5, 4.5])
                 
                 with filter_col1:
-                    show_active = st.checkbox("📝 要採点（未採点あり）を表示", value=True, key="filter_show_active")
+                    show_active = st.checkbox(settings.LABELS["progress_filter_active"], value=True, key="filter_show_active")
                 with filter_col2:
-                    show_completed = st.checkbox("✅ 採点完了分を表示", value=True, key="filter_show_completed")
+                    show_completed = st.checkbox(settings.LABELS["progress_filter_completed"], value=True, key="filter_show_completed")
                 with filter_col3:
                     # 💡 デフォルトOFF（False）でフィルターを追加
-                    show_expired = st.checkbox("⏰ 過去の採点完了日分を表示", value=False, key="filter_show_expired")
+                    show_expired = st.checkbox(settings.LABELS["progress_filter_expired"], value=False, key="filter_show_expired")
 
                 with filter_col4:
                     # 💡 gradersマスタからIDと名前のマッピングを高速生成
@@ -135,7 +136,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                             if g_id:
                                 grader_name_map[str(g_id).strip()] = str(g_name).strip() if g_name else ""
                     except Exception as e:
-                        st.warning(f"⚠️ 採点者マスタの取得に失敗しました: {e}")
+                        st.warning(settings.LABELS["grader_master_error"].format(error=e))
 
                     # 集計データに存在するユニークな採点者IDを自動取得
                     grader_column_name = '採点者ID' if '採点者ID' in df_summary.columns else 'checker_webid'
@@ -152,7 +153,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                         return str(option_id)
 
                     selected_graders = st.multiselect(
-                        "👤 担当採点者で絞り込み (未選択時は全表示)",
+                        settings.LABELS["grader_filter"],
                         options=available_graders,
                         default=[],
                         format_func=format_grader_option,
@@ -186,15 +187,15 @@ def show_progress_management(supabase, settings, display_confirm_panel):
 
                 # 💡 データが0件になった場合のチェックも、.empty を使わず安全に len() で判定
                 if len(df_summary) == 0:
-                    st.caption("💡 フィルター適用後の表示件数: 0 件")
-                    st.info("対象の採点データが見つかりません。")
+                    st.caption(settings.LABELS["filtered_count"].format(count=0))
+                    st.info(settings.LABELS["no_scoring_data"])
                 else:
-                    st.caption(f"💡 フィルター適用後の表示件数: {len(df_summary)} 件")
+                    st.caption(settings.LABELS["filtered_count"].format(count=len(df_summary)))
 
                 # ─── 🛠️ 一括更新エリア（UI表示） ───
                 area_bulk_cols = st.columns([1.0, 1.0, 1.0, 1.0, 1.0, 4.0, 4.0, 5.5])
                 with area_bulk_cols[-1]:
-                    btn_label = "🔼 一括変更を閉じる" if st.session_state["show_bulk_area"] else "🔽 一括変更を開く"
+                    btn_label = settings.LABELS["bulk_close"] if st.session_state["show_bulk_area"] else settings.LABELS["bulk_open"]
                     if st.button(btn_label, key="toggle_bulk_btn", use_container_width=True):
                         st.session_state["show_bulk_area"] = not st.session_state["show_bulk_area"]
                         st.rerun()
@@ -203,7 +204,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                 bulk_checker_webid = None
                 if st.session_state["show_bulk_area"]:
                     with st.container(border=True):
-                        st.markdown("<span style='font-weight:bold; font-size:14px;'>↓チェックした行を一括変更↓</span>", unsafe_allow_html=True)
+                        st.markdown(f"<span style='font-weight:bold; font-size:14px;'>{settings.LABELS['bulk_instruction']}</span>", unsafe_allow_html=True)
                         inner_col1, inner_col2 = st.columns(2)
                         with inner_col1:
                             bulk_select_idx = st.selectbox(
@@ -213,24 +214,24 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                             )
                             bulk_checker_webid = member_ids[bulk_select_idx]
                         with inner_col2:
-                            bulk_update_clicked = st.button("一括更新", key="bulk_update_btn", use_container_width=True)
+                            bulk_update_clicked = st.button(settings.LABELS["bulk_update"], key="bulk_update_btn", use_container_width=True)
                 # ─── 🌟 一括更新用のプレースホルダーをループ手前に配置して固定 ───
                 bulk_msg_container = st.empty()
 
                 # ─── 📊 データテーブルのヘッダー描画（保留数項目を加えた11列構成） ───
-                grader_name_label = settings.LABELS.get('col_grader_name', '採点者名')
+                grader_name_label = settings.LABELS["col_grader_name"]
                 
                 # カラムの幅を細かく調整（11個の列オブジェクトのリストを作成）
                 h_cols = st.columns([0.6, 0.8, 1.2, 1.4, 1.2, 1.0, 1.0, 1.0, 1.0, 2.0, 4.0])
                 h_cols[0].markdown("**選択**")
-                h_cols[1].markdown("**行番号**")
+                h_cols[1].markdown(f"**{settings.LABELS['row_number']}**")
                 h_cols[2].markdown(f"**{settings.LABELS['col_grader']}**")
-                h_cols[3].markdown("**採点完了日**")
+                h_cols[3].markdown(f"**{settings.LABELS['completion_date']}**")
                 h_cols[4].markdown(f"**{settings.LABELS['col_response']}**")
-                h_cols[5].markdown("**総採点数**")
-                h_cols[6].markdown("**未採点数**")
-                h_cols[7].markdown("**採点済数**")
-                h_cols[8].markdown("**採点保留数**")  # 💡 新設項目
+                h_cols[5].markdown(f"**{settings.LABELS['total_count']}**")
+                h_cols[6].markdown(f"**{settings.LABELS['ungraded_count']}**")
+                h_cols[7].markdown(f"**{settings.LABELS['graded_count']}**")
+                h_cols[8].markdown(f"**{settings.LABELS['hold_count']}**")
                 h_cols[9].markdown(f"**{grader_name_label}**")
                 h_cols[10].markdown("**採点者変更**")
 
@@ -282,7 +283,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                     current_member_idx = member_ids.index(row['採点者ID']) if row['採点者ID'] in member_ids else 0
                     
                     # 🔓 --- 誤操作防止の安全ロックチェックボックス（10番目のカラムを指定） ---
-                    is_editable = cols[10].checkbox("🔓 変更する", key=f"lock_guard_{row_index}")
+                    is_editable = cols[10].checkbox(settings.LABELS["edit_grader"], key=f"lock_guard_{row_index}")
                     
                     select_idx = cols[10].selectbox(
                         "", options=range(len(member_ids)), index=current_member_idx,
@@ -291,10 +292,10 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                     )
                     new_checker_webid = member_ids[select_idx]
 
-                    if cols[10].button("変更", key=f"update_btn_{row_index}", use_container_width=True, disabled=not is_editable):
+                    if cols[10].button(settings.LABELS["change"], key=f"update_btn_{row_index}", use_container_width=True, disabled=not is_editable):
                         new_checker_webid = str(new_checker_webid).strip()
                         if new_checker_webid == "":
-                            st.warning("変更する採点者を選択してください。")
+                            st.warning(settings.LABELS["select_grader"])
                         else:
                             st.session_state[f"pending_update_{row_index}"] = {
                                 "response_id": row['問題ID'], 
@@ -329,9 +330,9 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                                 
                                 updated_rows = getattr(update_response, 'data', []) or []
                                 if len(updated_rows) == 0:
-                                    confirm_placeholder.warning("変更対象 of 未採点レコードが見つかりませんでした。")
+                                    confirm_placeholder.warning(settings.LABELS["no_scoring_data"])
                                 else:
-                                    st.toast(f"🔓 未採点レコード {len(updated_rows)} 件の担当者を変更しました。", icon="✅")
+                                    st.toast(settings.LABELS["bulk_update_success"].format(count=len(updated_rows)), icon="✅")
                                     del st.session_state[pending_key]
                                     st.rerun()
                             except Exception as update_error:
@@ -350,7 +351,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                             selected_indices.append(i)
                             
                     if not selected_indices:
-                        st.warning("⚠️ 一括変更する行を選択し、かつ対象行の「🔓 変更する」チェックボックスをONにしてロックを解除してください。")
+                        st.warning(settings.LABELS["bulk_select_required"])
                     else:
                         st.session_state["pending_bulk_update"] = {
                             "selected_indices": selected_indices,
@@ -361,18 +362,15 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                 pending_bulk = st.session_state.get("pending_bulk_update")
                 if pending_bulk:
                     if pending_bulk["new_webid"] == "":
-                        st.warning("一括変更先の採点者WEBIDを選択してください。")
+                        st.warning(settings.LABELS["bulk_target_required"])
                         del st.session_state["pending_bulk_update"]
                     else:
                         selected_idx_list = pending_bulk["selected_indices"]
                         new_webid = pending_bulk["new_webid"]
                         
                         row_numbers = [str(i + 1) for i in selected_idx_list]
-                        confirm_message = (
-                            f"🗂️ **一括更新の確認**\n\n"
-                            f"選択された **{len(selected_idx_list)} 件** の行から、**未採点問題のみ（白紙・空文字含む）** を抽出し担当者を一括変更します。\n"
-                            f"対象行番号: {', '.join(row_numbers)}\n"
-                            f"➡️ **変更後WEBID: {new_webid}**"
+                        confirm_message = settings.LABELS["bulk_confirm"].format(
+                            count=len(selected_idx_list), rows=", ".join(row_numbers), grader=new_webid
                         )
                         
                         bulk_confirmed = display_confirm_panel(confirm_message, "pending_bulk_update", container=bulk_msg_container)
@@ -381,7 +379,7 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                             try:
                                 total_success_groups = 0
                                 total_updated_records = 0
-                                with st.spinner("未採点レコードを抽出して一括更新中..."):
+                                with st.spinner(settings.LABELS["loading_bulk_update"]):
                                     for idx in selected_idx_list:
                                         target_row = row_records[idx]
                                         
@@ -405,28 +403,28 @@ def show_progress_management(supabase, settings, display_confirm_panel):
                                 
                                 del st.session_state["pending_bulk_update"]
                                 if total_updated_records == 0:
-                                    st.toast("⚠️ 対象行に未採点の問題が残っていなかったため、更新はスキップされました。", icon="ℹ️")
+                                    st.toast(settings.LABELS["bulk_update_no_target"], icon="ℹ️")
                                 else:
-                                    st.toast(f"🎉 正常に {total_success_groups} グループ（計 {total_updated_records} 件の未採点レコード）を一括更新しました！", icon="✅")
+                                    st.toast(settings.LABELS["bulk_update_done"].format(groups=total_success_groups, records=total_updated_records), icon="✅")
                                 st.rerun()
                                 
                             except Exception as bulk_err:
-                                st.error(f"❌ 一括更新エラー: {bulk_err}")
+                                st.error(settings.LABELS["bulk_update_error"].format(error=bulk_err))
                         elif bulk_confirmed is False:
                             del st.session_state["pending_bulk_update"]
                             st.rerun()
             else:
-                st.info("対象の採点データが見つかりません。")
+                st.info(settings.LABELS["bulk_no_rows"])
 
     except Exception as group_err:
-        st.error(f"データ取得中にエラーが発生しました: {group_err}")
+        st.error(settings.LABELS["progress_load_error"].format(error=group_err))
 
 
 
 # ==============================================================================
 # 🛠️ テストモード限定：採点問題テーブル全削除する処理
 # ==============================================================================
-def show_danger_zone_test_tools(supabase):
+def show_danger_zone_test_tools(supabase, settings):
     """
     🚨【テスト環境専用】問題テーブル全削除ツール
     """
@@ -438,15 +436,15 @@ def show_danger_zone_test_tools(supabase):
         return
 
     st.markdown("---")
-    st.markdown("### 🛠️ 管理者テスト用デバッグツール")
-    st.caption("※このエリアは「🛠️ テスト用デバッグ」タブのトグルスイッチがオンの時だけ自動的に露出します。")
+    st.markdown(settings.LABELS["danger_title"])
+    st.caption(settings.LABELS["danger_description"])
 
     # 二重の安全ロック（確認チェックボックス）
-    danger_check = st.checkbox("⚠️ 本当に全ての問題データを完全に削除してもよろしいですか？（元に戻せません）", key="test_danger_delete_check")
+    danger_check = st.checkbox(settings.LABELS["danger_confirm"], key="test_danger_delete_check")
     
-    if st.button("🔥 問題テーブルの全データを物理削除する", key="test_all_delete_btn", use_container_width=True, disabled=not danger_check):
+    if st.button(settings.LABELS["danger_delete"], key="test_all_delete_btn", use_container_width=True, disabled=not danger_check):
         try:
-            with st.spinner("データベースを初期化中..."):
+            with st.spinner(settings.LABELS["database_initialize"]):
                 # 主キー（saiten_question_id）が 0 より大きいもの（＝全件）を物理削除
                 supabase.table("tbl_scoring_question_management") \
                     .delete() \
@@ -465,9 +463,9 @@ def show_danger_zone_test_tools(supabase):
                 except Exception:
                     pass
                 
-                st.success("💥 問題管理テーブルの全データを正常に物理削除・初期化しました！")
+                st.success(settings.LABELS["danger_success"])
                 time.sleep(1.5)
                 st.rerun()
                 
         except Exception as e:
-            st.error(f"物理削除の実行に失敗しました: {e}")
+            st.error(settings.LABELS["danger_error"].format(error=e))

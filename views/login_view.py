@@ -10,20 +10,20 @@ def show_login_page(supabase, settings):
     st.markdown(settings.LABELS["login_title"])
     
     with st.form("login_form"):
-        input_id = st.text_input("採点者ID", placeholder=settings.LABELS["input_id_placeholder"])
-        input_pass = st.text_input("パスワード", type="password", placeholder=settings.LABELS["input_pass_placeholder"])
+        input_id = st.text_input(settings.LABELS["login_user_id"], placeholder=settings.LABELS["input_id_placeholder"])
+        input_pass = st.text_input(settings.LABELS["login_password"], type="password", placeholder=settings.LABELS["input_pass_placeholder"])
         
         # フォーム内のボタン等幅対称配置
         col_login, col_unlock = st.columns(2)
         with col_login:
             submit_button = st.form_submit_button(settings.LABELS["login_button"], use_container_width=True)
         with col_unlock:
-            unlock_button = st.form_submit_button("🔓 ログイン状態を強制解除", use_container_width=True)
+            unlock_button = st.form_submit_button(settings.LABELS["force_unlock"], use_container_width=True)
         
         # --- ① 通常ログイン処理 ---
         if submit_button:
             if not input_id or not input_pass:
-                st.error("採点者IDとパスワードの両方を入力してください。")
+                st.error(settings.LABELS["login_required_fields"])
             else:
                 try:
                     response = supabase.table("graders") \
@@ -58,17 +58,17 @@ def show_login_page(supabase, settings):
                                 elapsed_seconds = now_epoch - db_epoch
                                 
                                 # 🧪 デバッグ情報の出力
-                                st.info(f"🔍 [デバッグ情報] 経過: {int(elapsed_seconds)}秒 / 制限: {timeout_limit}秒 (DB値: {raw_last_activity})")
+                                st.info(settings.LABELS["login_debug_time"].format(elapsed=int(elapsed_seconds), limit=timeout_limit, db_value=raw_last_activity))
                                 
                                 if elapsed_seconds > timeout_limit or elapsed_seconds < 0:
                                     is_timeout = True
                                     
                             except Exception as e:
-                                st.error(f"⚠️ 時刻判定エリアでエラー: {e} (元データ: {raw_last_activity})")
+                                st.error(settings.LABELS["login_time_error"].format(error=e, db_value=raw_last_activity))
 
                         # ⚠️ 二重ログインチェック
                         if current_status is True and not is_timeout:
-                            st.error("❌ このアカウントは既に他の端末でログイン中です（二重ログイン防止）。")
+                            st.error(settings.LABELS["login_already_active"])
                         else:
                             # 救済または通常ログイン成功に伴うDB更新
                             now_str = datetime.now(timezone.utc).isoformat()
@@ -99,17 +99,17 @@ def show_login_page(supabase, settings):
                             st.session_state["role_id"] = parsed_role
                             st.session_state["last_activity_time"] = time.time()  # タイムアウト監視を開始
                             
-                            st.success("ログインに成功しました！")
+                            st.success(settings.LABELS["login_success"])
                             st.rerun()
                     else:
-                        st.error("採点者IDまたはパスワードが正しくありません。")
+                        st.error(settings.LABELS["login_invalid_credentials"])
                 except Exception as e:
-                    st.error(f"認証エラーが発生しました: {e}")
+                    st.error(settings.LABELS["login_error"].format(error=e))
 
         # --- ② ログイン詰まり強制解除処理 ---
         if unlock_button:
             if not input_id or not input_pass:
-                st.error("認証解除を行うには、対象の採点者IDとパスワードを正しく入力してください。")
+                st.error(settings.LABELS["unlock_required_fields"])
             else:
                 try:
                     # IDとパスワードの整合性を確認
@@ -137,8 +137,8 @@ def show_login_page(supabase, settings):
                             .eq("locked_by_webid", input_id) \
                             .execute()
                             
-                        st.success("🔓 ログイン状態、および掴んでいた問題のレコードロックを正常に強制解除しました。もう一度ログインを試みてください。")
+                        st.success(settings.LABELS["unlock_success"])
                     else:
-                        st.error("採点者IDまたはパスワードが正しくありません。ロック解除に失敗しました。")
+                        st.error(settings.LABELS["unlock_invalid_credentials"])
                 except Exception as e:
-                    st.error(f"解除処理中にエラーが発生しました: {e}")
+                    st.error(settings.LABELS["unlock_error"].format(error=e))

@@ -40,7 +40,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
             st.rerun()
 
         try:
-            with st.spinner("データを受信中..."):
+            with st.spinner(settings.LABELS["loading_data"]):
                 # 💡 自分宛てデータをロード
                 response = supabase.table("tbl_scoring_question_management") \
                     .select("checker_webid, response_id, judge_mark_result, grading_comp_date, ai_judge_mark, is_locked, locked_by_webid, locked_at") \
@@ -78,14 +78,14 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 df_summary.columns = ['採点者ID', '採点完了日', '問題ID', '総数', '未採点', '採点済', '保留']
 
                 # 🔍 表示フィルターUI（横並びに綺麗に配置）
-                st.markdown("##### 🔍 表示フィルター")
+                st.markdown(settings.LABELS["display_filter"])
                 filter_col1, filter_col2 = st.columns([1.0, 1.0])
                 
                 with filter_col1:
-                    filter_active = st.checkbox("⏳ 未採点・保留ありのグループのみ表示", value=False, key="main_list_filter_active")
+                    filter_active = st.checkbox(settings.LABELS["question_filter_active"], value=False, key="main_list_filter_active")
                 with filter_col2:
                     # 💡 採点完了日超過のトグル（デフォルトOFF = 超過は非表示）
-                    show_expired = st.checkbox("⏰ 採点完了日超過も表示", value=False, key="main_list_filter_expired")
+                    show_expired = st.checkbox(settings.LABELS["question_filter_expired"], value=False, key="main_list_filter_expired")
 
                 # 🧮 フィルター1: 未採点・保留ありによる絞り込み
                 if filter_active:
@@ -104,13 +104,13 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     df_summary = df_summary[is_future_or_empty]
 
                 if df_summary.empty:
-                    st.success("✨ 現在、表示条件に該当する採点対象データはありません！")
+                    st.success(settings.LABELS["question_no_filtered_data"])
                     return
 
                 # 完了日の昇順で完全整列（優先順位：採点完了日 ➔ 問題ID）
                 df_summary = df_summary.sort_values(by=['採点完了日', '問題ID'], ascending=[True, True])
 
-                st.metric("表示中の問題パターン数", len(df_summary))
+                st.metric(settings.LABELS["question_count"], len(df_summary))
                 st.write("")
 
                 # ─── 📊 グリッドヘッダー描画 ───
@@ -119,9 +119,9 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 h_col2.markdown("**採点完了日**")
                 h_col3.markdown("**問題**")
                 h_col4.markdown("**総数**")
-                h_col5.markdown("**未採点**")
+                h_col5.markdown(f"**{settings.LABELS['col_ungraded']}**")
                 h_col6.markdown("**採点済**")
-                h_col7.markdown("**保留**")
+                h_col7.markdown(f"**{settings.LABELS['hold_count']}**")
                 h_col8.markdown("**操作**")
                 st.divider()
 
@@ -167,10 +167,10 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     
                     st.markdown("<hr style='margin: 0.3em 0; border: 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
             else:
-                st.info("💡 現在、データベース内に有効な採点対象レコードが割り当てられていません。")
+                st.info(settings.LABELS["question_no_data"])
 
         except Exception as e:
-            st.error(f"一覧取得エラーが発生しました: {e}")
+            st.error(settings.LABELS["question_list_error"].format(error=e))
     # ==========================================================
     # ✍️ ステップ2: 1レコードずつの個別採点画面 (current_step が "grading" のとき)
     # ==========================================================
@@ -194,10 +194,10 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
             except Exception:
                 pass
 
-            st.subheader(f"🔍 採点中: {display_title}")
-            st.caption(f"担当採点者: {selected_grader} | 問題ID: {selected_response} | 採点完了日: {selected_comp_date}")
+            st.subheader(settings.LABELS["question_grading_title"].format(title=display_title))
+            st.caption(settings.LABELS["question_context"].format(grader=selected_grader, response=selected_response, date=selected_comp_date))
 
-            if st.button("⬅️ 問題一覧に戻る", key="back_to_list_btn"):
+            if st.button(settings.LABELS["back_to_question_list"], key="back_to_list_btn"):
                 st.session_state["selected_grader"] = None
                 st.session_state["selected_response"] = None
                 st.session_state["selected_comp_date"] = None
@@ -206,7 +206,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 st.rerun()
 
             # 大元の最新データをSupabaseから安全にロード
-            with st.spinner("採点対象データを読み込み中..."):
+            with st.spinner(settings.LABELS["loading_question_records"]):
                 detail_response = supabase.table("tbl_scoring_question_management") \
                     .select("*") \
                     .eq("checker_webid", selected_grader) \
@@ -218,7 +218,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
             detail_rows = detail_response.data or []
             
             if not detail_rows:
-                st.warning("採点対象のレコードが見つかりませんでした。")
+                st.warning(settings.LABELS["question_records_not_found"])
                 st.session_state["current_step"] = "select"
                 st.rerun()
             else:
@@ -257,8 +257,8 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 is_currently_conflict = db_is_locked and (str(db_locked_by).strip() != str(login_user_id).strip()) and (not is_lock_expired)
 
                 if is_currently_conflict:
-                    st.error(f"⚠️ この問題は現在、別の採点者（ID: {db_locked_by}）が画面を開いて採点中のため、ロックされています。")
-                    st.info("💡 内容の閲覧は可能ですが、判定ボタンの操作やメモの書き込みはバッティング防止のため制限されます。")
+                    st.error(settings.LABELS["question_locked"].format(grader=db_locked_by))
+                    st.info(settings.LABELS["question_locked_readonly"])
                     is_admin_locked = True
                 else:
                     is_admin_locked = False
@@ -272,52 +272,52 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 # 📝 左のエリア：現在の採点状況、解答、AIチェック
                 # ==========================================================
                 with left_view:
-                    st.markdown("### 📝 回答内容・情報")
+                    st.markdown(settings.LABELS["answer_information"])
                     
-                    text_answer = current_row.get("answer", "（データなし）")
-                    text_cp1 = current_row.get("ai_cp1", "（データなし）")
-                    text_cp2 = current_row.get("ai_cp2", "（データなし）")
-                    text_cp3 = current_row.get("ai_cp3", "（データなし）")
-                    text_reason = current_row.get("ai_reason", "（データなし）")
+                    text_answer = current_row.get("answer", settings.LABELS["no_data_value"])
+                    text_cp1 = current_row.get("ai_cp1", settings.LABELS["no_data_value"])
+                    text_cp2 = current_row.get("ai_cp2", settings.LABELS["no_data_value"])
+                    text_cp3 = current_row.get("ai_cp3", settings.LABELS["no_data_value"])
+                    text_reason = current_row.get("ai_reason", settings.LABELS["no_data_value"])
                     ai_judge_val = current_row.get("ai_judge_mark")
                     current_judge = current_row.get("judge_mark_result")
                     
                     with st.container(border=True):
-                        st.markdown("**【解答 (answer)】**")
+                        st.markdown(settings.LABELS["answer_label"])
                         clean_answer = str(text_answer).replace("\n", "  \n")
                         st.markdown(clean_answer)
                     
                     with st.container(border=True):
-                        st.markdown("**🤖 AI採点チェックポイント1**")
+                        st.markdown(settings.LABELS["ai_checkpoint_1"])
                         st.write(text_cp1)
-                        st.markdown("**🤖 AI採点チェックポイント2**")
+                        st.markdown(settings.LABELS["ai_checkpoint_2"])
                         st.write(text_cp2)
-                        st.markdown("**🤖 AI採点チェックポイント3**")
+                        st.markdown(settings.LABELS["ai_checkpoint_3"])
                         st.write(text_cp3)
 
                     with st.container(border=True):
-                        st.markdown("**💡 AI採点判断理由**")
+                        st.markdown(settings.LABELS["ai_reason"])
                         clean_reason = str(text_reason).replace("\n", "  \n")
                         st.markdown(clean_reason)
 
                     with st.container(border=True):
-                        st.markdown("**🤖 AI採点結果**")
+                        st.markdown(settings.LABELS["ai_result"])
                         if pd.isna(ai_judge_val) or str(ai_judge_val).strip() == "":
-                            ai_status_html = "<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>データなし</span>"
+                            ai_status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_no_data']}</span>"
                         elif ai_judge_val == "O":
-                            ai_status_html = "<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>🟢 正答(O)</span>"
+                            ai_status_html = f"<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_correct']}</span>"
                         elif ai_judge_val == "X":
-                            ai_status_html = "<span style='background-color: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>🔴 誤答(X)</span>"
+                            ai_status_html = f"<span style='background-color: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_wrong']}</span>"
                         elif ai_judge_val == "*":
-                            ai_status_html = "<span style='background-color: #9e9e9e; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>⚪ 無答(*)</span>"
+                            ai_status_html = f"<span style='background-color: #9e9e9e; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_none']}</span>"
                         else:
                             ai_status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{ai_judge_val}</span>"
-                        st.markdown(f"AI判定: {ai_status_html}", unsafe_allow_html=True)
+                        st.markdown(settings.LABELS["ai_judgement"].format(status=ai_status_html), unsafe_allow_html=True)
                 # ==========================================================
                 # 📥 右のエリア：正答画像、判定ボタン、メモ、レコード移動
                 # ==========================================================
                 with right_input:
-                    st.markdown("### 🗂️ 採点入力・お手本確認")
+                    st.markdown(settings.LABELS["grading_input"])
                     current_response_id = current_row.get("response_id")
                     
                     try:
@@ -338,7 +338,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                             except Exception:
                                 full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
 
-                            st.markdown("**🎯 正答画像 (お手本)** ※クリックで別タブで拡大")
+                            st.markdown(settings.LABELS["correct_image"])
                             st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
 
                             html_preview = f"""
@@ -350,9 +350,9 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                             """
                             st.markdown(html_preview, unsafe_allow_html=True)
                         else:
-                            st.caption("⚠️ 正答画像ファイル名が登録されていません。")
+                            st.caption(settings.LABELS["image_missing"])
                     except Exception as img_err:
-                        st.caption(f"（画像読み込みスキップ: {img_err}）")
+                        st.caption(settings.LABELS["image_load_skipped"].format(error=img_err))
                  
                     st.write("")
 
@@ -361,15 +361,15 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     is_admin_locked = has_approver and str(db_approver).strip() != str(st.session_state.get("user_id")).strip()
                     
                     if pd.isna(current_judge) or str(current_judge).strip() == "":
-                        status_html = "<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>⏳ 未採点</span>"
+                        status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['ungraded_status']}</span>"
                     elif current_judge == "O":
-                        status_html = "<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>🟢 正答(O)</span>"
+                        status_html = f"<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_correct']}</span>"
                     elif current_judge == "X":
-                        status_html = "<span style='background-color: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>🔴 誤答(X)</span>"
+                        status_html = f"<span style='background-color: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_wrong']}</span>"
                     elif current_judge == "*":
-                        status_html = "<span style='background-color: #9e9e9e; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>⚪ 無答(*)</span>"
+                        status_html = f"<span style='background-color: #9e9e9e; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_none']}</span>"
                     elif current_judge == "H":
-                        status_html = "<span style='background-color: #6f42c1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>🟣 保留(H)</span>"
+                        status_html = f"<span style='background-color: #6f42c1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_hold']}</span>"
                     else:
                         status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{current_judge}</span>"
 
@@ -378,15 +378,15 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     
                     status_col1, status_col2 = st.columns([1.0, 1.0])
                     with status_col1:
-                        st.markdown(f"**現在の採点状況:** {status_html}", unsafe_allow_html=True)
+                        st.markdown(settings.LABELS["current_status"].format(status=status_html), unsafe_allow_html=True)
                     with status_col2:
                         st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_num}問目（{total_num}問中）</p>", unsafe_allow_html=True)
                     
                     st.write("")
                     if is_admin_locked:
-                        st.warning(f"🔒 この問題は管理者によって判定が確定しているため、上書き変更はロックされています（閲覧専用）。")
+                        st.warning(settings.LABELS["admin_locked"])
                     else:
-                        st.write("採点判定を選択してください（ボタンを押すと即時保存して次の問題へ進みます）：")
+                        st.write(settings.LABELS["select_judgement"])
                     
                     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                     selected_score = None
@@ -477,19 +477,19 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         </script>
                         """
                         st.components.v1.html(js_shortcut, height=0, width=0)
-                    if btn_col1.button("🟢 正答(O)", key=f"ans_true_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
+                    if btn_col1.button(settings.LABELS["answer_score_correct"], key=f"ans_true_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "O"
-                    if btn_col2.button("🔴 誤答(X)", key=f"ans_false_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
+                    if btn_col2.button(settings.LABELS["answer_score_wrong"], key=f"ans_false_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "X"
-                    if btn_col3.button("⚪ 無答(*)", key=f"ans_none_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
+                    if btn_col3.button(settings.LABELS["answer_score_none"], key=f"ans_none_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "*"
-                    if btn_col4.button("🟡 保留(H)", key=f"ans_hold_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
+                    if btn_col4.button(settings.LABELS["answer_score_hold"], key=f"ans_hold_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "H"
 
                     st.write("")
 
                     memo_input = st.text_area(
-                        "採点メモ / コメント", 
+                        settings.LABELS["memo"],
                         value=current_row.get("memo", "") if current_row.get("memo") else "",
                         key=f"memo_text_{row_pkey}",
                         disabled=is_admin_locked
@@ -499,12 +499,12 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     st.write("📂 **レコード移動・ナビゲーション**")
                     nav_col1, nav_col2, nav_col3, nav_col4, nav_col5, nav_col6 = st.columns([2.5, 2.2, 1.5, 1.5, 1.5, 2.2])
                     
-                    if nav_col1.button("⏪ 先頭へ戻る", key="first_detail_btn", use_container_width=True):
+                    if nav_col1.button(settings.LABELS["first_record_short"], key="first_detail_btn", use_container_width=True):
                         if current_index > 0:
                             st.session_state["selected_row_index"] = 0
                             st.rerun()
 
-                    if nav_col2.button("⏮️ 前の未採点へ", key="prev_unprocessed_btn", use_container_width=True):
+                    if nav_col2.button(settings.LABELS["previous_unprocessed_short"], key="prev_unprocessed_btn", use_container_width=True):
                         import time as time_module_prev
                         target_index_prev = None
                         for i in range(current_index - 1, -1, -1):
@@ -523,11 +523,11 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                     break
                             if target_index_prev is not None:
                                 st.session_state["selected_row_index"] = target_index_prev
-                                st.warning("🔄 現在地より手前に未採点・保留がないため、末尾に戻って逆引き検索しました。")
+                                st.warning(settings.LABELS["question_previous_wrap"])
                                 time_module_prev.sleep(1.0)
                                 st.rerun()
                             else:
-                                st.info("✨ 現在地より手前に未採点・保留データはありません。")
+                                st.info(settings.LABELS["question_previous_none"])
 
                     if nav_col3.button("◀ 前へ", key="prev_detail_btn", use_container_width=True):
                         if current_index > 0:
@@ -541,7 +541,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                             st.session_state["selected_row_index"] = current_index + 1
                             st.rerun()
 
-                    if nav_col6.button("⏭️ 次の未採点へ", key="next_unprocessed_btn", use_container_width=True):
+                    if nav_col6.button(settings.LABELS["next_unprocessed_short"], key="next_unprocessed_btn", use_container_width=True):
                         import time as time_module_next
                         target_index_next = None
                         for i in range(current_index + 1, total_records):
@@ -560,12 +560,12 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                     break
                             if target_index_next is not None:
                                 st.session_state["selected_row_index"] = target_index_next
-                                st.warning("🔄 現在地より後ろに未採点・保留がないため、先頭に戻って検索しました。")
+                                st.warning(settings.LABELS["question_next_wrap"])
                                 time_module_next.sleep(1.0)
                                 r_judge = detail_rows[i].get("judge_mark_result")
                                 st.rerun()
                             else:
-                                st.info("✨ この問題に含まれるすべての未採点・保留データは処理完了しています！")
+                                st.info(settings.LABELS["question_next_none"])
 
                 # ─── 🔄 いずれかのボタンが押されたら自動でSupabaseへ保存 ───
                 if selected_score is not None:
@@ -586,18 +586,18 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                 .execute()
                         
                         if not is_last_record:
-                            st.toast(f"🟢 判定「{selected_score}」で正常に保存しました！", icon="✅")
+                            st.toast(settings.LABELS["question_save_success"].format(score=selected_score), icon="✅")
                             st.session_state["selected_row_index"] = current_index + 1
                             st.rerun()
                         else:
-                            @st.dialog("🎉 採点完了の確認")
+                            @st.dialog(settings.LABELS["question_finish_title"])
                             def show_finish_dialog():
-                                st.markdown("##### ✨ これで最後の採点が終了しました！")
-                                st.write("最終判定の保存は完了しています。このまま問題一覧画面に戻りますか？それとも内容を見知しますか？")
+                                st.markdown(settings.LABELS["question_finish_heading"])
+                                st.write(settings.LABELS["question_finish_message"])
                                 st.write("")
                                 
                                 with st.form(key="finish_confirm_2btn_form", border=False):
-                                    submit_btn = st.form_submit_button("✅ このまま登録をして一覧に戻る", use_container_width=True)
+                                    submit_btn = st.form_submit_button(settings.LABELS["question_finish_submit"], use_container_width=True)
                                     if submit_btn:
                                         st.balloons()
                                         st.session_state["selected_grader"] = None
@@ -607,10 +607,10 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                         st.session_state["current_step"] = "select"
                                         st.rerun()
                                 
-                                if st.button("🔍 もう一度採点を見直す", use_container_width=True):
+                                if st.button(settings.LABELS["question_review_again"], use_container_width=True):
                                     st.rerun()
                             
                             show_finish_dialog()
                         
                     except Exception as e:
-                        st.error(f"データベースの更新に失敗しました: {e}")
+                        st.error(settings.LABELS["question_update_error"].format(error=e))
