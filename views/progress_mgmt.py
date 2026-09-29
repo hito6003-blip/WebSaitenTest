@@ -5,9 +5,19 @@ import streamlit as st
 from zoneinfo import ZoneInfo
 
 try:
-    from master_cache import clear_master_cache, get_question_master, get_grader_master
+    from master_cache import (
+        clear_master_cache,
+        get_question_master,
+        get_grader_master,
+        get_scoring_group_master,
+    )
 except ImportError:
-    from views.master_cache import clear_master_cache, get_question_master, get_grader_master
+    from views.master_cache import (
+        clear_master_cache,
+        get_question_master,
+        get_grader_master,
+        get_scoring_group_master,
+    )
 
 # ==========================================================
 # 💡 負荷対策：問題マスタの取得を2分間キャッシュ化する
@@ -42,21 +52,21 @@ def show_progress_management(supabase, settings, display_confirm_panel):
 
     try:
         with st.spinner("データを受信中..."):
-            # ユーザー権限によるデータ絞り込み
+            # 採点者・グループは全画面共通の短時間キャッシュを利用します。
+            all_graders = get_grader_master(supabase)
             if user_role_id == 4:
-                group_members_query = supabase.table("graders").select("grader_id, grader_name, group_id")
+                group_members_data = all_graders
             else:
-                group_members_query = supabase.table("graders").select("grader_id, grader_name, group_id").eq("group_id", current_group_id)
-            
-            group_members = group_members_query.execute()
+                group_members_data = [
+                    grader for grader in all_graders
+                    if str(grader.get("group_id")) == str(current_group_id)
+                ]
 
-            # グループマスタマッピングデータの構築
-            groups_res = supabase.table("scoring_groups").select("group_id, group_name").execute()
-            groups_data = groups_res.data or []
+            groups_data = get_scoring_group_master(supabase)
             group_map = {row["group_id"]: row["group_name"] for row in groups_data if row.get("group_id") is not None}
 
-            group_member_map = {m["grader_id"]: m.get("grader_name", "") for m in (group_members.data or []) if m.get("grader_id") is not None}
-            member_group_id_map = {m["grader_id"]: m.get("group_id") for m in (group_members.data or []) if m.get("grader_id") is not None}
+            group_member_map = {m["grader_id"]: m.get("grader_name", "") for m in group_members_data if m.get("grader_id") is not None}
+            member_group_id_map = {m["grader_id"]: m.get("group_id") for m in group_members_data if m.get("grader_id") is not None}
             member_ids = list(group_member_map.keys())
 
             if not member_ids:
