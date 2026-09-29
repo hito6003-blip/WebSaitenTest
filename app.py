@@ -218,47 +218,71 @@ else:
 
     # ─── 🔄 タブの生成と画面呼び出し ───
     if visible_tab_labels:
-        tab_objs = st.tabs(visible_tab_labels)
-        tab_map = dict(zip(visible_tab_keys, tab_objs))
+        # st.tabs() は全タブの本体を毎回実行するため、非表示画面のDB取得まで発生します。
+        # 選択中の画面だけを実行し、再描画時のDBアクセスとUI生成を抑えます。
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stRadio"] div[role="radiogroup"] > label {
+                background: transparent !important;
+            }
+            div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] {
+                background: #dbeafe;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        selected_tab = st.radio(
+            "画面",
+            options=visible_tab_keys,
+            format_func=lambda key: visible_tab_labels[visible_tab_keys.index(key)],
+            horizontal=True,
+            key="active_tab_key",
+            label_visibility="collapsed",
+        )
+        tab_map = {selected_tab: st.container()}
         
-        if "tab1" in tab_map:
-            with tab_map["tab1"]:
+        if selected_tab == "tab1":
+            with tab_map[selected_tab]:
                 from views.question_list import show_question_list
                 show_question_list(supabase, settings, current_user_id, current_role_id)
                 
-        if "tab2" in tab_map:
-            with tab_map["tab2"]:
+        if selected_tab == "tab2":
+            with tab_map[selected_tab]:
                 from views.progress_mgmt import show_progress_management
                 show_progress_management(supabase, settings, display_confirm_panel)
                 
-        if "tab3" in tab_map:
-            with tab_map["tab3"]:
+        if selected_tab == "tab3":
+            with tab_map[selected_tab]:
                 from views.data_io_mgmt import show_csv_import
                 show_csv_import(supabase, settings)
                 
-        if "tab4" in tab_map:
-            with tab_map["tab4"]:
+        if selected_tab == "tab4":
+            with tab_map[selected_tab]:
                 from views.data_io_mgmt import show_file_io_sample
                 show_file_io_sample(settings)
                 
-        if "tab5" in tab_map:
-            with tab_map["tab5"]:
+        if selected_tab == "tab5":
+            with tab_map[selected_tab]:
                 from views.data_io_mgmt import show_data_io_management
                 show_data_io_management(supabase, settings)
                 
-        if "tab6" in tab_map:
-            with tab_map["tab6"]:
+        if selected_tab == "tab6":
+            with tab_map[selected_tab]:
                 from views.data_io_mgmt import show_graded_output
                 show_graded_output(supabase)
                 
-        if "tab7" in tab_map:
-            with tab_map["tab7"]:
+        if selected_tab == "tab7":
+            with tab_map[selected_tab]:
                 from views.hold_management import show_hold_management_page
                 show_hold_management_page(supabase, settings, display_confirm_panel, current_user_id)
 
         # 👑【新設】8番目のタブ：テスト用デバッグ画面の実装
-        if "tab8" in tab_map:
-            with tab_map["tab8"]:
+        if selected_tab == "tab8":
+            with tab_map[selected_tab]:
                 st.markdown("### 🛠️ テスト用デバッグ管理")
                 st.markdown("このタブは特権管理者（role_id=4）にのみ露出する安全な検証エリアです。")
                 

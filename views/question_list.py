@@ -1,13 +1,24 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime, date, timezone, timedelta
-from zoneinfo import ZoneInfo
 import time
+from datetime import date, datetime, timedelta, timezone
+import pandas as pd
+import streamlit as st
+from zoneinfo import ZoneInfo
 
 try:
     from master_cache import clear_master_cache, get_question_master
 except ImportError:
     from views.master_cache import clear_master_cache, get_question_master
+
+# ==========================================================
+# 💡 負荷対策：問題マスタの取得を2分間キャッシュ化する
+# ==========================================================
+@st.cache_data(ttl=120)
+def fetch_cached_question_master(_supabase):
+    """問題マスタをキャッシュ取得（20人同時アクセス時のDBパンク防止）"""
+    try:
+        return get_question_master(_supabase)
+    except Exception:
+        return []
 
 def show_question_list(supabase, settings, current_user_id, current_role_id):
     """
@@ -24,20 +35,21 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
     if st.session_state["current_step"] == "select":
         st.header(settings.LABELS["tab1_header"])
         if st.button(settings.LABELS["refresh_button"], key="refresh_btn"):
+            st.cache_data.clear() # キャッシュも一括クリア
             clear_master_cache()
             st.rerun()
 
         try:
             with st.spinner("データを受信中..."):
-                # 💡 PostgreSQL側で「自分宛て」かつ「AI判定が登録済」のものだけをピンポイント水際ロード！
+                # 💡 自分宛てデータをロード
                 response = supabase.table("tbl_scoring_question_management") \
                     .select("checker_webid, response_id, judge_mark_result, grading_comp_date, ai_judge_mark, is_locked, locked_by_webid, locked_at") \
                     .eq("checker_webid", current_user_id) \
                     .not_.is_("ai_judge_mark", "null") \
                     .execute()
                 
-                # 問題マスタから一括取得
-                master_data = get_question_master(supabase)
+                # キャッシュ化された問題マスタから一括取得
+                master_data = fetch_cached_question_master(supabase)
                 question_title_map = {row["response_id"]: row.get("question_title", "") for row in master_data if row.get("response_id")}
             
             if response.data:
@@ -51,7 +63,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 df_data["graded_filled"] = df_data["judge_mark_result"].str.strip().isin(["O", "X", "*"])
                 df_data["hold_filled"] = df_data["judge_mark_result"].str.strip() == "H"
                 df_data["ungraded_filled"] = df_data["judge_mark_result"].isna() | (df_data["judge_mark_result"].str.strip() == "")
-                
                 # 3軸グループ化ロジック
                 df_summary = (
                     df_data
@@ -66,30 +77,50 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 )
                 df_summary.columns = ['採点者ID', '採点完了日', '問題ID', '総数', '未採点', '採点済', '保留']
 
-                # 💡【UI改善】未採点や保留が残っている「要対応」のみに絞り込む簡易フィルター
+                # 🔍 表示フィルターUI（横並びに綺麗に配置）
                 st.markdown("##### 🔍 表示フィルター")
-                filter_active = st.checkbox("⏳ 未採点・保留ありのグループのみ表示", value=False, key="main_list_filter_active")
+                filter_col1, filter_col2 = st.columns([1.0, 1.0])
+                
+                with filter_col1:
+                    filter_active = st.checkbox("⏳ 未採点・保留ありのグループのみ表示", value=False, key="main_list_filter_active")
+                with filter_col2:
+                    # 💡 採点完了日超過のトグル（デフォルトOFF = 超過は非表示）
+                    show_expired = st.checkbox("⏰ 採点完了日超過も表示", value=False, key="main_list_filter_expired")
+
+                # 🧮 フィルター1: 未採点・保留ありによる絞り込み
                 if filter_active:
                     df_summary = df_summary[(df_summary['未採点'] > 0) | (df_summary['保留'] > 0)]
 
+                # 🧮 フィルター2: 採点完了日超過データの絞り込み（当日より過去のものを制御）
+                if not show_expired and not df_summary.empty:
+                    import datetime as dt_module
+                    today_str = dt_module.date.today().strftime("%Y-%m-%d")
+                    # 当日以降（未来）または日付が空（未定）のもののみを残す
+                    is_future_or_empty = (
+                        (df_summary['採点完了日'].isna()) | 
+                        (df_summary['採点完了日'].astype(str).str.strip() == "") |
+                        (df_summary['採点完了日'] >= today_str)
+                    )
+                    df_summary = df_summary[is_future_or_empty]
+
                 if df_summary.empty:
-                    st.success("✨ 現在、対応が必要な採点対象データはありません！すべて処理完了しています。")
+                    st.success("✨ 現在、表示条件に該当する採点対象データはありません！")
                     return
 
-                # 完了日の昇順で完全整列
+                # 完了日の昇順で完全整列（優先順位：採点完了日 ➔ 問題ID）
                 df_summary = df_summary.sort_values(by=['採点完了日', '問題ID'], ascending=[True, True])
 
                 st.metric("表示中の問題パターン数", len(df_summary))
                 st.write("")
 
-                # ─── 📊 グリッドヘッダー描画（採点済カラムを1列追加して等幅調整） ───
+                # ─── 📊 グリッドヘッダー描画 ───
                 h_col1, h_col2, h_col3, h_col4, h_col5, h_col6, h_col7, h_col8 = st.columns([1.5, 1.5, 3.2, 0.8, 0.8, 0.8, 0.8, 1.5])
                 h_col1.markdown("**担当採点者**")
                 h_col2.markdown("**採点完了日**")
                 h_col3.markdown("**問題**")
                 h_col4.markdown("**総数**")
                 h_col5.markdown("**未採点**")
-                h_col6.markdown("**採点済**") # 💡追加
+                h_col6.markdown("**採点済**")
                 h_col7.markdown("**保留**")
                 h_col8.markdown("**操作**")
                 st.divider()
@@ -99,7 +130,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.5, 3.2, 0.8, 0.8, 0.8, 0.8, 1.5])
                     
                     unprocessed_count = int(row['未採点'])
-                    graded_count = int(row['採点済']) # 💡取得
+                    graded_count = int(row['採点済'])
                     hold_count = int(row['保留'])
                     comp_date_val = row['採点完了日']
                     display_date = "（未設定）" if pd.isna(comp_date_val) else str(comp_date_val).strip()
@@ -109,7 +140,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     if not display_title or str(display_title).strip() == "":
                         display_title = current_response_id
                         
-                    # 未採点や保留があれば警告の赤、完了していれば安心の青
                     if unprocessed_count > 0 or hold_count > 0:
                         font_color = "#DC3545"
                         status_label = "✍️ 採点開始"
@@ -124,10 +154,9 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     col3.markdown(f"<div style='color: {font_color}; font-family: \"Meiryo\", sans-serif; font-weight: bold; font-size: 13px; white-space: normal; word-break: break-all; padding: 4px 0; line-height: 1.3;'>{display_title}</div>", unsafe_allow_html=True)
                     col4.markdown(f"<p style='{style_attr} text-align: center;'>{row['総数']}</p>", unsafe_allow_html=True)
                     col5.markdown(f"<p style='{style_attr} text-align: center;'>{unprocessed_count}</p>", unsafe_allow_html=True)
-                    col6.markdown(f"<p style='{style_attr} text-align: center;'>{graded_count}</p>", unsafe_allow_html=True) # 💡採点済数を正しく表示
+                    col6.markdown(f"<p style='{style_attr} text-align: center;'>{graded_count}</p>", unsafe_allow_html=True)
                     col7.markdown(f"<p style='{style_attr} text-align: center;'>{hold_count}</p>", unsafe_allow_html=True)
                     
-                    # 🚀 各ボタンにセッションを安全に同期させてステップ2（grading）へ突入
                     if col8.button(status_label, key=f"main_start_btn_{index}", use_container_width=True):
                         st.session_state["selected_grader"] = row['採点者ID']
                         st.session_state["selected_response"] = row['問題ID']
@@ -142,20 +171,21 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
 
         except Exception as e:
             st.error(f"一覧取得エラーが発生しました: {e}")
-
     # ==========================================================
     # ✍️ ステップ2: 1レコードずつの個別採点画面 (current_step が "grading" のとき)
     # ==========================================================
     elif st.session_state["current_step"] == "grading":
         selected_grader = st.session_state.get("selected_grader")
         selected_response = st.session_state.get("selected_response")
-        selected_comp_date = st.session_state.get("selected_comp_date")  # ✨新設キーのロード
+        selected_comp_date = st.session_state.get("selected_comp_date")
         
         if selected_grader and selected_response:
             display_title = selected_response
             try:
+                # 💡 修正：キャッシュ化されたマスタから安全に1件抽出（連打時のDBパンク防止）
+                cached_questions = fetch_cached_question_master(supabase)
                 question = next(
-                    (row for row in get_question_master(supabase) if row.get("response_id") == selected_response),
+                    (row for row in cached_questions if row.get("response_id") == selected_response),
                     None,
                 )
                 title_val = question.get("question_title") if question else None
@@ -170,12 +200,12 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
             if st.button("⬅️ 問題一覧に戻る", key="back_to_list_btn"):
                 st.session_state["selected_grader"] = None
                 st.session_state["selected_response"] = None
-                st.session_state["selected_comp_date"] = None  # クリア
+                st.session_state["selected_comp_date"] = None
                 st.session_state["selected_row_index"] = 0
                 st.session_state["current_step"] = "select"
                 st.rerun()
 
-            # 💡 大元の最新データをSupabaseから安全にロードする処理
+            # 大元の最新データをSupabaseから安全にロード
             with st.spinner("採点対象データを読み込み中..."):
                 detail_response = supabase.table("tbl_scoring_question_management") \
                     .select("*") \
@@ -235,11 +265,11 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
 
                 st.divider()
                 
-                # 📄 画面を左右等幅に美しく分割（左：データ表示、右：画像・操作入力）
-                left_view, right_input = st.columns([5.0,6.0])
+                # 📄 画面を左右等幅に分割
+                left_view, right_input = st.columns([5.0, 6.0])
 
                 # ==========================================================
-                # 📝 左のエリア：現在の採点状況、解答、AIチェック1〜3、AI判断理由、AI結果
+                # 📝 左のエリア：現在の採点状況、解答、AIチェック
                 # ==========================================================
                 with left_view:
                     st.markdown("### 📝 回答内容・情報")
@@ -283,7 +313,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         else:
                             ai_status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{ai_judge_val}</span>"
                         st.markdown(f"AI判定: {ai_status_html}", unsafe_allow_html=True)
-
                 # ==========================================================
                 # 📥 右のエリア：正答画像、判定ボタン、メモ、レコード移動
                 # ==========================================================
@@ -292,26 +321,26 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     current_response_id = current_row.get("response_id")
                     
                     try:
+                        # 💡 修正：キャッシュ化されたマスタから安全に抽出
+                        cached_questions = fetch_cached_question_master(supabase)
                         master_row = next(
-                            (row for row in get_question_master(supabase) if row.get("response_id") == current_response_id),
+                            (row for row in cached_questions if row.get("response_id") == current_response_id),
                             {},
                         )
                         file_name = master_row.get("correct_image_file_name")
 
                         if file_name and str(file_name).strip() != "":
-                            base_url = settings.STORAGE_BASE_URL
-                            if "/storage/" in base_url:
-                                domain = base_url.split("/storage/")[0]
-                            else:
-                                domain = base_url.rstrip("/")
-
-                            clean_file_name = str(file_name).strip()
-                            full_img_url = f"{domain}/storage/v1/object/public/correct_image/{clean_file_name}"
+                            # 💡 修正：Privateバケット高負荷対応用の「署名付きURL」発行処理
+                            bucket_name = "correct_image"
+                            try:
+                                res_url = supabase.storage.from_(bucket_name).create_signed_url(str(file_name).strip(), 60)
+                                full_img_url = res_url.get("signedURL") or res_url.get("signedUrl")
+                            except Exception:
+                                full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
 
                             st.markdown("**🎯 正答画像 (お手本)** ※クリックで別タブで拡大")
                             st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
 
-                            # 💡 ブラウザ標準のシンプルな a タグ（target="_blank"）のみに戻しました
                             html_preview = f"""
                             <div class="img-clickable-box">
                                 <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
@@ -325,14 +354,11 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     except Exception as img_err:
                         st.caption(f"（画像読み込みスキップ: {img_err}）")
                  
-           # ─────────────────────────────────────────────────────────
-
                     st.write("")
 
                     db_approver = current_row.get("final_approver_id")
                     has_approver = pd.notna(db_approver) and str(db_approver).strip() != "" and str(db_approver).lower() not in ["none", "null"]
                     is_admin_locked = has_approver and str(db_approver).strip() != str(st.session_state.get("user_id")).strip()
-                    
                     
                     if pd.isna(current_judge) or str(current_judge).strip() == "":
                         status_html = "<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>⏳ 未採点</span>"
@@ -347,26 +373,16 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     else:
                         status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{current_judge}</span>"
 
-                    
-                    # ─── 📊 【新規追加】採点状況の横に進捗問題数を美しく配置 ───
-                    # 現在のインデックス（0始まり）に+1した数値と、全体のレコード数を取得
                     current_num = current_index + 1
                     total_num = total_records
                     
-                    # st.columnsを使って、現在の採点状況（左）と問題数（右）を等幅で綺麗に横並び配置
                     status_col1, status_col2 = st.columns([1.0, 1.0])
-                    
                     with status_col1:
                         st.markdown(f"**現在の採点状況:** {status_html}", unsafe_allow_html=True)
-                        
                     with status_col2:
-                        # 💡 採点者がパッと直感的に見やすいように太字の青マイルド色でテキストを描画
                         st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_num}問目（{total_num}問中）</p>", unsafe_allow_html=True)
                     
                     st.write("")
-                    # ───────────────────────────────────────────────────────
-
-                    
                     if is_admin_locked:
                         st.warning(f"🔒 この問題は管理者によって判定が確定しているため、上書き変更はロックされています（閲覧専用）。")
                     else:
@@ -375,59 +391,41 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                     selected_score = None
 
-                    # ─── 🎨 【確実背景色変更】選ばれていないボタンの背景色をグレーにするCSS ───
                     if pd.notna(current_judge) and str(current_judge).strip() != "":
                         tgt = str(current_judge).strip()
                         c_styles = "<style>"
-                        
-                        # 選択されていない判定ボタンの背景をグレー(#E0E0E0)、文字を薄くする
                         if tgt != "O": c_styles += f"div[class*='st-key-ans_true_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
                         if tgt != "X": c_styles += f"div[class*='st-key-ans_false_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
                         if tgt != "*": c_styles += f"div[class*='st-key-ans_none_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
                         if tgt != "H": c_styles += f"div[class*='st-key-ans_hold_'] button {{ background-color: #E0E0E0 !important; color: #888888 !important; opacity: 0.6 !important; }}"
-                        
-                        # 選択されているボタンの枠線を黒く太く強調する
                         act_key = {"O": "ans_true_", "X": "ans_false_", "*": "ans_none_", "H": "ans_hold_"}.get(tgt)
                         if act_key: c_styles += f"div[class*='st-key-{act_key}'] button {{ border: 3px solid #111111 !important; font-weight: bold !important; box-shadow: 0px 4px 10px rgba(0,0,0,0.15) !important; }}"
-                        
                         c_styles += "</style>"
                         st.markdown(c_styles, unsafe_allow_html=True)
-                        
-                    # ─────────────────────────────────────────────────────────────────────────
-                 
 
-                    # ─── ⌨️ 【完全版】入力監視＆画像ウィンドウ一元管理JavaScript ───
                     if not is_admin_locked:
                         js_shortcut = f"""
                         <script>
-                        // Streamlitアプリが動いている最上位のメイン画面のドキュメントをがっちり捕捉
                         const doc = window.parent.document;
-                        
-                        // 画面が再描画されるたびに命令が重複してフリーズするのを防ぐため、古い命令を一度完全にお掃除
                         if (window.scoringKeydownHandler) doc.removeEventListener('keydown', window.scoringKeydownHandler);
                         if (window.openOtehonHandler) doc.removeEventListener('open_otehon_image', window.openOtehonHandler);
                         if (window.closeOtehonHandler) doc.removeEventListener('close_otehon_window', window.closeOtehonHandler);
                         
-                        // 💡 メイン画面側の変数として、開いた別ウィンドウのハンドル（操縦権限）をずっと記憶します
                         if (!window.hasOwnProperty('otehonWindowRef')) {{
                             window.otehonWindowRef = null;
                         }}
                         
-                        // 💡 【超重要】画像がクリックされた時に、メイン画面の権限で確実にタブを開く（使い回す）処理
                         window.openOtehonHandler = function(e) {{
                             const url = e.detail;
-                            // すでにタブが開いていて、かつ閉じられていない場合は、中身のURLだけを切り替えてフォーカスします（乱立防止）
                             if (window.otehonWindowRef && !window.otehonWindowRef.closed) {{
                                 window.otehonWindowRef.location.href = url;
                                 window.otehonWindowRef.focus();
                             }} else {{
-                                // まだ開いていない場合は、新しく名前をつけて開きます
                                 window.otehonWindowRef = window.parent.open(url, 'otehon_secure_tab');
                             }}
                         }};
                         doc.addEventListener('open_otehon_image', window.openOtehonHandler);
                         
-                        // 💡 一覧に戻るボタン（またはEnter）が押されたときに、開いているタブを強制終了する処理
                         window.closeOtehonHandler = function() {{
                             if (window.otehonWindowRef && !window.otehonWindowRef.closed) {{
                                 window.otehonWindowRef.close();
@@ -436,7 +434,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         }};
                         doc.addEventListener('close_otehon_window', window.closeOtehonHandler);
                         
-                        // 🟢 キーボードショートカット（O, X, Space, H, N, B）の監視処理
                         window.scoringKeydownHandler = function(e) {{
                             if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
                             if (e.repeat) return;
@@ -480,8 +477,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         </script>
                         """
                         st.components.v1.html(js_shortcut, height=0, width=0)
-                    # ─────────────────────────────────────────────────────────
-
                     if btn_col1.button("🟢 正答(O)", key=f"ans_true_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
                         selected_score = "O"
                     if btn_col2.button("🔴 誤答(X)", key=f"ans_false_{row_pkey}", use_container_width=True, disabled=is_admin_locked):
@@ -492,7 +487,6 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                         selected_score = "H"
 
                     st.write("")
-
 
                     memo_input = st.text_area(
                         "採点メモ / コメント", 
@@ -568,6 +562,7 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                 st.session_state["selected_row_index"] = target_index_next
                                 st.warning("🔄 現在地より後ろに未採点・保留がないため、先頭に戻って検索しました。")
                                 time_module_next.sleep(1.0)
+                                r_judge = detail_rows[i].get("judge_mark_result")
                                 st.rerun()
                             else:
                                 st.info("✨ この問題に含まれるすべての未採点・保留データは処理完了しています！")
@@ -575,13 +570,11 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 # ─── 🔄 いずれかのボタンが押されたら自動でSupabaseへ保存 ───
                 if selected_score is not None:
                     try:
-                        # 💡 最後のレコードかどうかを正確に判定
                         is_last_record = (current_index >= total_records - 1)
 
                         with st.spinner("Supabaseに保存中..."):
                             approver_id = st.session_state.get("user_id")
                             
-                            # 最後の判定結果をデータベースへ確実に先行保存
                             supabase.table("tbl_scoring_question_management") \
                                 .update({
                                     "judge_mark_result": selected_score,
@@ -593,25 +586,20 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                 .execute()
                         
                         if not is_last_record:
-                            # まだ後ろにレコードがある場合は通常通り次へ進む
                             st.toast(f"🟢 判定「{selected_score}」で正常に保存しました！", icon="✅")
                             st.session_state["selected_row_index"] = current_index + 1
                             st.rerun()
                         else:
-                            # 💡 最後のレコードの場合、その場に2ボタン形式の確認ダイアログを起動
                             @st.dialog("🎉 採点完了の確認")
                             def show_finish_dialog():
                                 st.markdown("##### ✨ これで最後の採点が終了しました！")
-                                st.write("最終判定の保存は完了しています。このまま問題一覧画面に戻りますか？それとも内容を見直しますか？")
-                                st.write("（※そのまま **Enterキー** を押すと一覧に戻ります）")
+                                st.write("最終判定の保存は完了しています。このまま問題一覧画面に戻りますか？それとも内容を見知しますか？")
                                 st.write("")
                                 
-                                # 横並びのフォームボタンを配置
                                 with st.form(key="finish_confirm_2btn_form", border=False):
                                     submit_btn = st.form_submit_button("✅ このまま登録をして一覧に戻る", use_container_width=True)
                                     if submit_btn:
-                                        # 💡 複雑なJSの干渉をすべて消去
-                                        st.balloons() # 完了演出
+                                        st.balloons()
                                         st.session_state["selected_grader"] = None
                                         st.session_state["selected_response"] = None
                                         st.session_state["selected_comp_date"] = None
@@ -619,12 +607,9 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                                         st.session_state["current_step"] = "select"
                                         st.rerun()
                                 
-                                # 2. サブアクション（見直し：フォームの外に置くことでEnter誤爆を防ぎ、クリック専用にします）
                                 if st.button("🔍 もう一度採点を見直す", use_container_width=True):
-                                    # 一覧に戻らず、ポップアップを閉じて現在の最後の問題画面を再描画する
                                     st.rerun()
                             
-                            # ダイアログを自動起動
                             show_finish_dialog()
                         
                     except Exception as e:
