@@ -220,6 +220,21 @@ else:
     if visible_tab_labels:
         # st.tabs() は全タブの本体を毎回実行するため、非表示画面のDB取得まで発生します。
         # 選択中の画面だけを実行し、再描画時のDBアクセスとUI生成を抑えます。
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stRadio"] div[role="radiogroup"] > label {
+                background: transparent !important;
+            }
+            div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] {
+                background: #dbeafe;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         selected_tab = st.radio(
             "画面",
             options=visible_tab_keys,
