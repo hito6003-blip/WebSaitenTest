@@ -386,27 +386,62 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                 text_cp1 = current_row.get("ai_cp1", settings.LABELS["no_data_value"])
                 text_cp2 = current_row.get("ai_cp2", settings.LABELS["no_data_value"])
                 text_cp3 = current_row.get("ai_cp3", settings.LABELS["no_data_value"])
-                text_reason = current_row.get("ai_reason", settings.LABELS["no_data_value"])
                 ai_judge_val = current_row.get("ai_judge_mark")
                 current_judge = current_row.get("judge_mark_result")
 
-                with st.container(border=True):
-                    st.markdown("**【解答 (answer)】**")
-                    clean_answer = str(text_answer).replace("\n", "  \n")
-                    st.markdown(clean_answer)
+                current_response_id = current_row.get("response_id")
+                try:
+                    master_response = supabase.table("mst_questions") \
+                        .select("correct_image_file_name") \
+                        .eq("response_id", current_response_id) \
+                        .limit(1) \
+                        .execute()
+
+                    if master_response.data and len(master_response.data) > 0:
+                        first_row = next(iter(master_response.data), {})
+                        file_name = first_row.get("correct_image_file_name")
+
+                        if file_name and str(file_name).strip() != "":
+                            base_url = settings.STORAGE_BASE_URL
+
+                            if "object/sign/" in base_url:
+                                base_url = base_url.replace("object/sign/", "object/public/")
+                            if "object/authenticated/" in base_url:
+                                base_url = base_url.replace("object/authenticated/", "object/public/")
+
+                            base_url = base_url.rstrip("/") + "/"
+                            clean_file_name = str(file_name).strip()
+
+                            if "correct_image/" in base_url:
+                                full_img_url = f"{base_url}{clean_file_name}"
+                            else:
+                                full_img_url = f"{base_url}correct_image/{clean_file_name}"
+
+                            st.markdown(settings.LABELS["correct_standard"])
+                            st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
+
+                            html_preview = f"""
+                            <div class="img-clickable-box">
+                                <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
+                                    <img src="{full_img_url}" />
+                                </a>
+                            </div>
+                            """
+                            st.markdown(html_preview, unsafe_allow_html=True)
+                        else:
+                            st.caption(settings.LABELS["image_missing"])
+                    else:
+                        st.caption(settings.LABELS["image_missing"])
+                except Exception as img_err:
+                    st.caption(settings.LABELS["image_load_skipped"].format(error=img_err))
                 
                 with st.container(border=True):
-                    st.markdown(settings.LABELS["ai_checkpoint_1"])
-                    st.write(text_cp1)
-                    st.markdown(settings.LABELS["ai_checkpoint_2"])
-                    st.write(text_cp2)
-                    st.markdown(settings.LABELS["ai_checkpoint_3"])
-                    st.write(text_cp3)
-
-                with st.container(border=True):
-                    st.markdown(settings.LABELS["ai_reason"])
-                    clean_reason = str(text_reason).replace("\n", "  \n")
-                    st.markdown(clean_reason)
+                    st.markdown("**AI判断ポイント**")
+                    for checkpoint_value in (text_cp1, text_cp2, text_cp3):
+                        checkpoint_lines = str(checkpoint_value).splitlines() or [""]
+                        st.markdown(f"**{checkpoint_lines[0]}**")
+                        if len(checkpoint_lines) > 1:
+                            st.write("\n".join(checkpoint_lines[1:]))
 
                 with st.container(border=True):
                     st.markdown(settings.LABELS["ai_result"])
@@ -426,52 +461,10 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
             # ==========================================================
             with right_input:
                 st.markdown(settings.LABELS["hold_input_title"])
-                current_response_id = current_row.get("response_id")
-                
-                try:
-                    master_response = supabase.table("mst_questions") \
-                        .select("correct_image_file_name") \
-                        .eq("response_id", current_response_id) \
-                        .limit(1) \
-                        .execute()
-                        
-                    if master_response.data and len(master_response.data) > 0:
-                        first_row = next(iter(master_response.data), {})
-                        file_name = first_row.get("correct_image_file_name")
-                        
-                        if file_name and str(file_name).strip() != "":
-                            base_url = settings.STORAGE_BASE_URL
-                            
-                            if "object/sign/" in base_url:
-                                base_url = base_url.replace("object/sign/", "object/public/")
-                            if "object/authenticated/" in base_url:
-                                base_url = base_url.replace("object/authenticated/", "object/public/")
-                            
-                            base_url = base_url.rstrip("/") + "/"
-                            clean_file_name = str(file_name).strip()
-                            
-                            if "correct_image/" in base_url:
-                                full_img_url = f"{base_url}{clean_file_name}"
-                            else:
-                                full_img_url = f"{base_url}correct_image/{clean_file_name}"
-                            
-                            st.markdown(settings.LABELS["correct_standard"])
-                            st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
-                            
-                            html_preview = f"""
-                            <div class="img-clickable-box">
-                                <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
-                                    <img src="{full_img_url}" />
-                                </a>
-                            </div>
-                            """
-                            st.markdown(html_preview, unsafe_allow_html=True)
-                        else:
-                            st.caption(settings.LABELS["image_missing"])
-                    else:
-                        st.caption(settings.LABELS["image_missing"])
-                except Exception as img_err:
-                    st.caption(settings.LABELS["image_load_skipped"].format(error=img_err))
+                with st.container(border=True):
+                    st.markdown("**【解答 (answer)】**")
+                    clean_answer = str(text_answer).replace("\n", "  \n")
+                    st.markdown(clean_answer)
 
                 if is_currently_locked:
                     st.warning(settings.LABELS["hold_locked"].format(grader=db_locked_by))
@@ -575,12 +568,6 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                 if btn_cols[2].button(settings.LABELS["answer_score_none"], key=f"h_score_N_{row_pkey}", use_container_width=True, disabled=is_currently_locked):
                     selected_score = "*"
 
-                # ─── 📊 採点状況の右側に問題数を美しく配置（登録者名の追記版） ───
-                if pd.isna(current_judge) or str(current_judge).strip() == "H":
-                    status_html = f"<span style='background-color: #6f42c1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_hold']}</span>"
-                else:
-                    status_html = f"<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['confirmed_status'].format(status=current_judge)}</span>"
-                
                 # 💡 誰が登録した値なのかをマスタから逆引きしてテキストを生成
                 raw_approver_id = current_row.get("final_approver_id")
                 if pd.notna(raw_approver_id) and str(raw_approver_id).strip() not in ["", "None", "null"]:
@@ -595,10 +582,9 @@ def show_hold_management_page(supabase, settings, display_confirm_panel, current
                     approver_html = "<span style='font-size: 13px; color: #888888; margin-left: 8px; font-style: italic;'>👤 確定者: なし（初期状態）</span>"
 
                 st.write("")
-                # 左右に分割して、左側に「状態＋確定者名」、右側に「〇問目」を表示します
                 status_col1, status_col2 = st.columns([1.5, 1.0])
                 with status_col1:
-                    st.markdown(settings.LABELS["current_status"].format(status=f"{status_html}{approver_html}"), unsafe_allow_html=True)
+                    st.markdown(approver_html, unsafe_allow_html=True)
                 with status_col2:
                     st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_index + 1}問目（{len(all_rows)}問中）</p>", unsafe_allow_html=True)
                 st.write("")
