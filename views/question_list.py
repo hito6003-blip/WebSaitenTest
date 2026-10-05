@@ -278,27 +278,49 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                     text_cp1 = current_row.get("ai_cp1", settings.LABELS["no_data_value"])
                     text_cp2 = current_row.get("ai_cp2", settings.LABELS["no_data_value"])
                     text_cp3 = current_row.get("ai_cp3", settings.LABELS["no_data_value"])
-                    text_reason = current_row.get("ai_reason", settings.LABELS["no_data_value"])
                     ai_judge_val = current_row.get("ai_judge_mark")
                     current_judge = current_row.get("judge_mark_result")
                     
-                    with st.container(border=True):
-                        st.markdown(settings.LABELS["answer_label"])
-                        clean_answer = str(text_answer).replace("\n", "  \n")
-                        st.markdown(clean_answer)
+                    # 正答画像は解答と入れ替えて左側に表示
+                    current_response_id = current_row.get("response_id")
+                    try:
+                        cached_questions = fetch_cached_question_master(supabase)
+                        master_row = next(
+                            (row for row in cached_questions if row.get("response_id") == current_response_id),
+                            {},
+                        )
+                        file_name = master_row.get("correct_image_file_name")
+
+                        if file_name and str(file_name).strip() != "":
+                            bucket_name = "correct_image"
+                            try:
+                                res_url = supabase.storage.from_(bucket_name).create_signed_url(str(file_name).strip(), 60)
+                                full_img_url = res_url.get("signedURL") or res_url.get("signedUrl")
+                            except Exception:
+                                full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
+
+                            st.markdown(settings.LABELS["correct_image"])
+                            st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
+                            html_preview = f"""
+                            <div class="img-clickable-box">
+                                <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
+                                    <img src="{full_img_url}" />
+                                </a>
+                            </div>
+                            """
+                            st.markdown(html_preview, unsafe_allow_html=True)
+                        else:
+                            st.caption(settings.LABELS["image_missing"])
+                    except Exception as img_err:
+                        st.caption(settings.LABELS["image_load_skipped"].format(error=img_err))
                     
                     with st.container(border=True):
-                        st.markdown(settings.LABELS["ai_checkpoint_1"])
-                        st.write(text_cp1)
-                        st.markdown(settings.LABELS["ai_checkpoint_2"])
-                        st.write(text_cp2)
-                        st.markdown(settings.LABELS["ai_checkpoint_3"])
-                        st.write(text_cp3)
-
-                    with st.container(border=True):
-                        st.markdown(settings.LABELS["ai_reason"])
-                        clean_reason = str(text_reason).replace("\n", "  \n")
-                        st.markdown(clean_reason)
+                        st.markdown("**AI判断ポイント**")
+                        for checkpoint_value in (text_cp1, text_cp2, text_cp3):
+                            checkpoint_lines = str(checkpoint_value).splitlines() or [""]
+                            st.markdown(f"**{checkpoint_lines[0]}**")
+                            if len(checkpoint_lines) > 1:
+                                st.write("\n".join(checkpoint_lines[1:]))
 
                     with st.container(border=True):
                         st.markdown(settings.LABELS["ai_result"])
@@ -318,69 +340,20 @@ def show_question_list(supabase, settings, current_user_id, current_role_id):
                 # ==========================================================
                 with right_input:
                     st.markdown(settings.LABELS["grading_input"])
-                    current_response_id = current_row.get("response_id")
-                    
-                    try:
-                        # 💡 修正：キャッシュ化されたマスタから安全に抽出
-                        cached_questions = fetch_cached_question_master(supabase)
-                        master_row = next(
-                            (row for row in cached_questions if row.get("response_id") == current_response_id),
-                            {},
-                        )
-                        file_name = master_row.get("correct_image_file_name")
+                    with st.container(border=True):
+                        st.markdown(settings.LABELS["answer_label"])
+                        clean_answer = str(text_answer).replace("\n", "  \n")
+                        st.markdown(clean_answer)
 
-                        if file_name and str(file_name).strip() != "":
-                            # 💡 修正：Privateバケット高負荷対応用の「署名付きURL」発行処理
-                            bucket_name = "correct_image"
-                            try:
-                                res_url = supabase.storage.from_(bucket_name).create_signed_url(str(file_name).strip(), 60)
-                                full_img_url = res_url.get("signedURL") or res_url.get("signedUrl")
-                            except Exception:
-                                full_img_url = f"{settings.STORAGE_BASE_URL}{file_name}"
-
-                            st.markdown(settings.LABELS["correct_image"])
-                            st.markdown("<style>div.img-clickable-box img { max-height: 280px; object-fit: contain; width: 100%; border-radius: 4px; border: 1px solid #ddd; transition: opacity 0.2s; } div.img-clickable-box img:hover { opacity: 0.8; cursor: pointer; }</style>", unsafe_allow_html=True)
-
-                            html_preview = f"""
-                            <div class="img-clickable-box">
-                                <a href="{full_img_url}" target="_blank" title="別ウィンドウで拡大表示">
-                                    <img src="{full_img_url}" />
-                                </a>
-                            </div>
-                            """
-                            st.markdown(html_preview, unsafe_allow_html=True)
-                        else:
-                            st.caption(settings.LABELS["image_missing"])
-                    except Exception as img_err:
-                        st.caption(settings.LABELS["image_load_skipped"].format(error=img_err))
-                 
                     st.write("")
 
                     db_approver = current_row.get("final_approver_id")
                     has_approver = pd.notna(db_approver) and str(db_approver).strip() != "" and str(db_approver).lower() not in ["none", "null"]
                     is_admin_locked = has_approver and str(db_approver).strip() != str(st.session_state.get("user_id")).strip()
                     
-                    if pd.isna(current_judge) or str(current_judge).strip() == "":
-                        status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['ungraded_status']}</span>"
-                    elif current_judge == "O":
-                        status_html = f"<span style='background-color: #1266F1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_correct']}</span>"
-                    elif current_judge == "X":
-                        status_html = f"<span style='background-color: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_wrong']}</span>"
-                    elif current_judge == "*":
-                        status_html = f"<span style='background-color: #9e9e9e; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_none']}</span>"
-                    elif current_judge == "H":
-                        status_html = f"<span style='background-color: #6f42c1; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{settings.LABELS['status_hold']}</span>"
-                    else:
-                        status_html = f"<span style='background-color: #757575; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;'>{current_judge}</span>"
-
                     current_num = current_index + 1
                     total_num = total_records
-                    
-                    status_col1, status_col2 = st.columns([1.0, 1.0])
-                    with status_col1:
-                        st.markdown(settings.LABELS["current_status"].format(status=status_html), unsafe_allow_html=True)
-                    with status_col2:
-                        st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_num}問目（{total_num}問中）</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='margin:0; font-size:15px; font-weight:bold; color:#1266F1; line-height:1.8; text-align:right;'>📄 {current_num}問目（{total_num}問中）</p>", unsafe_allow_html=True)
                     
                     st.write("")
                     if is_admin_locked:
